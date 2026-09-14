@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase & Google Services configurations
+GoogleService-Info.plist
+google-services.json
+**/ios/GoogleService-Info.plist
+**/android/app/google-services.json
