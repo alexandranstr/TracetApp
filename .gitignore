@@ -432,3 +432,8 @@ FodyWeavers.xsd
 serviceAccountKey.json
 *.env
 .env*
+
+GoogleService-Info.plist
+google-services.json
+**/GoogleService-Info.plist
+**/google-services.json
