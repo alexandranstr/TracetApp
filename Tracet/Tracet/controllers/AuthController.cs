@@ -1,4 +1,5 @@
 using FirebaseAdmin.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tracet.data;
@@ -125,6 +126,24 @@ public class AuthController : ControllerBase
         {
             return Unauthorized(new { message = "Invalid token." });
         }
+    }
+    
+    [HttpGet("resolve-email")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResolveEmail([FromQuery] string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return BadRequest(new { message = "Username required." });
+
+        var cleanUsername = username.Trim().TrimStart('@').ToLower();
+    
+        var user = await _dbContext.Users
+            .FirstOrDefaultAsync(u => u.Username != null && u.Username.ToLower() == cleanUsername);
+
+        if (user == null || string.IsNullOrEmpty(user.Email))
+            return NotFound(new { message = "User not found." });
+
+        return Ok(new { email = user.Email });
     }
 }
 
