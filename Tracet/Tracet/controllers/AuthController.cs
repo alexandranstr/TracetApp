@@ -78,7 +78,7 @@ public class AuthController : ControllerBase
             return StatusCode(500, new { message = "Server error processing authentication.", error = ex.Message });
         }
     }
-    
+
     public class UpdateProfileDto
     {
         public string DisplayName { get; set; } = string.Empty;
@@ -127,7 +127,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Invalid token." });
         }
     }
-    
+
     [HttpGet("resolve-email")]
     [AllowAnonymous]
     public async Task<IActionResult> ResolveEmail([FromQuery] string username)
@@ -136,7 +136,7 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Username required." });
 
         var cleanUsername = username.Trim().TrimStart('@').ToLower();
-    
+
         var user = await _dbContext.Users
             .FirstOrDefaultAsync(u => u.Username != null && u.Username.ToLower() == cleanUsername);
 
@@ -146,4 +146,3 @@ public class AuthController : ControllerBase
         return Ok(new { email = user.Email });
     }
 }
-
