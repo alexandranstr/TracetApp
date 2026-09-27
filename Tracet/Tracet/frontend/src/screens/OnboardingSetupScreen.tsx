@@ -19,6 +19,7 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { getAuth } from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
@@ -44,7 +45,7 @@ export default function OnboardingSetupScreen({ navigation }: any) {
     const [homeCountry, setHomeCountry] = useState('');
     const [photoUri, setPhotoUri] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
-    
+
     const [isCountryModalVisible, setIsCountryModalVisible] = useState(false);
     const [searchCountry, setSearchCountry] = useState('');
 
@@ -112,7 +113,15 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                 throw new Error(data.message || 'Could not complete profile setup.');
             }
 
-            navigation.navigate('MainTab');
+
+            const resolvedUserId = data?.id || data?.userId || currentUser.uid;
+            await AsyncStorage.setItem('userId', resolvedUserId);
+
+
+            navigation.reset({
+                index: 0,
+                routes: [{ name: 'MainTab' }],
+            });
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Something went wrong while setting up your profile.');
         } finally {
@@ -128,7 +137,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
         <View style={styles.mainContainer}>
             <StatusBar barStyle="light-content" />
 
-            {}
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
                     <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />
@@ -158,7 +166,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                             <Text style={styles.subtitle}>SET UP YOUR TRAVEL IDENTITY</Text>
                         </View>
 
-                        {}
                         <TouchableOpacity style={styles.avatarContainer} onPress={pickImage} activeOpacity={0.8}>
                             {photoUri ? (
                                 <Image source={{ uri: photoUri }} style={styles.avatarImage} />
@@ -174,7 +181,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                         </TouchableOpacity>
 
                         <View style={styles.formContainer}>
-                            {}
                             <View style={styles.inputWrapper}>
                                 <Text style={styles.label}>FULL NAME</Text>
                                 <TextInput
@@ -184,7 +190,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                                 />
                             </View>
 
-                            {}
                             <View style={styles.inputWrapper}>
                                 <Text style={styles.label}>USERNAME</Text>
                                 <TextInput
@@ -196,7 +201,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                                 />
                             </View>
 
-                            {}
                             <View style={styles.inputWrapper}>
                                 <Text style={styles.label}>HOME COUNTRY</Text>
                                 <TouchableOpacity
@@ -225,7 +229,6 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                 </KeyboardAvoidingView>
             </SafeAreaView>
 
-            {}
             <Modal
                 visible={isCountryModalVisible}
                 animationType="slide"

@@ -7,4 +7,5 @@ public class LocationTag
 
     public int TagId { get; set; }
     public Tag Tag { get; set; } = null!;
+    public int TagCount { get; set; } = 1;
 }

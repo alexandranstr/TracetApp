@@ -9,7 +9,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.alexandranstr.frontend",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Tracet needs your location to display your position on the map and drop pins at nearby spots.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tracet needs your location to display your position on the map."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -29,10 +33,16 @@
     },
     "plugins": [
       [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Tracet to use your location."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {
-            "useFrameworks": "dynamic"
+            "useFrameworks": "static"
           }
         }
       ],
@@ -44,7 +54,10 @@
       ],
       "@react-native-firebase/app",
       "@react-native-google-signin/google-signin",
-      "@react-native-firebase/auth"
+      "@react-native-firebase/auth",
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      "expo-font"
     ]
   }
 }

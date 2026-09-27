@@ -11,8 +11,8 @@ using Tracet.data;
 namespace Tracet.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260914085217_AddOnboardingProfileFields")]
-    partial class AddOnboardingProfileFields
+    [Migration("20260927074649_AddLocationTagCount")]
+    partial class AddLocationTagCount
     {
 
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -121,6 +121,12 @@ namespace Tracet.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("EntityType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("GooglePlaceId")
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("Latitude")
                         .HasColumnType("REAL");
 
@@ -141,6 +147,9 @@ namespace Tracet.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TagCount")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("LocationId", "TagId");
@@ -212,6 +221,10 @@ namespace Tracet.Migrations
                     b.Property<int?>("Rating")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("TagsVectorJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -250,42 +263,62 @@ namespace Tracet.Migrations
                         new
                         {
                             Id = 1,
-                            Name = "Quiet"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Name = "Scenic"
-                        },
-                        new
-                        {
-                            Id = 3,
                             Name = "Nightlife"
                         },
                         new
                         {
+                            Id = 2,
+                            Name = "Romantic"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Name = "Hidden Gem"
+                        },
+                        new
+                        {
                             Id = 4,
-                            Name = "Beach"
+                            Name = "Family-Friendly"
                         },
                         new
                         {
                             Id = 5,
-                            Name = "Countryside"
+                            Name = "Quiet & Relaxing"
                         },
                         new
                         {
                             Id = 6,
-                            Name = "Historic"
+                            Name = "Historical"
                         },
                         new
                         {
                             Id = 7,
-                            Name = "Budget-Friendly"
+                            Name = "Scenic View"
                         },
                         new
                         {
                             Id = 8,
-                            Name = "Family-Friendly"
+                            Name = "Food & Drinks"
+                        },
+                        new
+                        {
+                            Id = 9,
+                            Name = "Nature & Beach"
+                        },
+                        new
+                        {
+                            Id = 10,
+                            Name = "Budget-Friendly"
+                        },
+                        new
+                        {
+                            Id = 11,
+                            Name = "Culture & Art"
+                        },
+                        new
+                        {
+                            Id = 12,
+                            Name = "Adventure"
                         });
                 });
 

@@ -5,7 +5,7 @@ public class Pin
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string JournalEntry { get; set; } = string.Empty;
-    public string Category { get; set; } = "General"; 
+    public string Category { get; set; } = "General";
     public int? Rating { get; set; }
     public bool IsPrivate { get; set; } = false;
     public DateTime VisitedAt { get; set; } = DateTime.UtcNow;
@@ -17,5 +17,6 @@ public class Pin
     public int LocationId { get; set; }
     public Location Location { get; set; } = null!;
 
-    public string PhotoUrlsJson { get; set; } = "[]"; 
+    public string PhotoUrlsJson { get; set; } = "[]";
+    public string TagsVectorJson { get; set; } = "[]";
 }

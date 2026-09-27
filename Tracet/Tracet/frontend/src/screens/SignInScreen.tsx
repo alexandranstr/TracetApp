@@ -17,11 +17,12 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { getAuth, signInWithCredential, GoogleAuthProvider, signInWithEmailAndPassword } from '@react-native-firebase/auth';
 import { syncUserWithBackend } from '../services/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
 export default function SignInScreen({ navigation }: any) {
-    const [loginIdentifier, setLoginIdentifier] = useState(''); 
+    const [loginIdentifier, setLoginIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -69,16 +70,25 @@ export default function SignInScreen({ navigation }: any) {
             const userCredential = await signInWithEmailAndPassword(getAuth(), targetEmail, password);
             const dbUser = await syncUserWithBackend(userCredential.user);
 
+
+            const resolvedUserId = dbUser?.id || userCredential.user.uid;
+            await AsyncStorage.setItem('userId', resolvedUserId);
+
             setIsLoading(false);
 
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
             } else {
-                navigation.navigate('MainTab');
+
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'MainTab' }],
+                });
             }
         } catch (error: any) {
             setIsLoading(false);
             console.error('Sign-In Error:', error);
+            Alert.alert('Sign-In Failed', error.message || 'Invalid credentials.');
         }
     };
 
@@ -98,10 +108,19 @@ export default function SignInScreen({ navigation }: any) {
             const userCredential = await signInWithCredential(getAuth(), googleCredential);
 
             const dbUser = await syncUserWithBackend(userCredential.user);
+
+
+            const resolvedUserId = dbUser?.id || userCredential.user.uid;
+            await AsyncStorage.setItem('userId', resolvedUserId);
+
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
             } else {
-                navigation.navigate('MainTab');
+
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'MainTab' }],
+                });
             }
         } catch (error: any) {
             if (
@@ -119,7 +138,6 @@ export default function SignInScreen({ navigation }: any) {
         <View style={styles.mainContainer}>
             <StatusBar barStyle="light-content" />
 
-            {}
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
                     <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />

@@ -17,6 +17,7 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { getAuth, signInWithCredential, GoogleAuthProvider, createUserWithEmailAndPassword } from '@react-native-firebase/auth';
 import { syncUserWithBackend } from '../services/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -24,6 +25,7 @@ export default function SignUpScreen({ navigation }: any) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
         GoogleSignin.configure({
@@ -48,15 +50,29 @@ export default function SignUpScreen({ navigation }: any) {
             return;
         }
 
+        setIsLoading(true);
+
         try {
             const userCredential = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
             const dbUser = await syncUserWithBackend(userCredential.user);
+
+
+            const resolvedUserId = dbUser?.id || userCredential.user.uid;
+            await AsyncStorage.setItem('userId', resolvedUserId);
+
+            setIsLoading(false);
+
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
             } else {
-                navigation.navigate('MainTab');
+
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'MainTab' }],
+                });
             }
         } catch (error: any) {
+            setIsLoading(false);
             if (error.code === 'auth/email-already-in-use') {
                 Alert.alert('Sign-Up Error', 'That email address is already in use.');
             } else {
@@ -86,10 +102,19 @@ export default function SignUpScreen({ navigation }: any) {
             const userCredential = await signInWithCredential(getAuth(), googleCredential);
 
             const dbUser = await syncUserWithBackend(userCredential.user);
+
+
+            const resolvedUserId = dbUser?.id || userCredential.user.uid;
+            await AsyncStorage.setItem('userId', resolvedUserId);
+
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
             } else {
-                navigation.navigate('MainTab');
+
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'MainTab' }],
+                });
             }
         } catch (error: any) {
             if (
@@ -109,7 +134,6 @@ export default function SignUpScreen({ navigation }: any) {
         <View style={styles.mainContainer}>
             <StatusBar barStyle="light-content" />
 
-            {}
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
                     <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />
@@ -186,8 +210,11 @@ export default function SignUpScreen({ navigation }: any) {
                                 style={styles.primaryButton}
                                 activeOpacity={0.85}
                                 onPress={handleSignUp}
+                                disabled={isLoading}
                             >
-                                <Text style={styles.primaryButtonText}>Continue</Text>
+                                <Text style={styles.primaryButtonText}>
+                                    {isLoading ? 'Creating...' : 'Continue'}
+                                </Text>
                             </TouchableOpacity>
                         </View>
 
