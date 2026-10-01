@@ -20,6 +20,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import CreatePinOverlay, { LocationData } from '../components/CreatePinOverlay';
 import CustomMapMarker, { PinData } from '../components/CustomMapMarker';
 import PinDetailOverlay from '../components/PinDetailOverlay';
+import ProfileSettings from '../components/ProfileSettings';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -333,11 +334,10 @@ export default function MainTab({ navigation, route }: any) {
                 );
             case 'Profile':
                 return (
-                    <SafeAreaView style={styles.tabViewContainer}>
-                        <Ionicons name="person" size={48} color={PINK_ACCENT} />
-                        <Text style={styles.tabTitle}>Your Profile</Text>
-                        <Text style={styles.tabSubtitle}>View stats, visited countries, and settings.</Text>
-                    </SafeAreaView>
+                    <ProfileSettings
+                        currentUserId={currentUserId}
+                        navigation={navigation}
+                    />
                 );
             case 'Map':
             default:
