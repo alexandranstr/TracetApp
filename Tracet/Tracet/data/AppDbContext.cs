@@ -23,6 +23,18 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<LocationTag>()
             .HasKey(lt => new { lt.LocationId, lt.TagId });
+        
+        modelBuilder.Entity<Friendship>()
+            .HasOne(f => f.User)
+            .WithMany()
+            .HasForeignKey(f => f.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Friendship>()
+            .HasOne(f => f.Friend)
+            .WithMany()
+            .HasForeignKey(f => f.FriendId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Tag>().HasData(
             new Tag { Id = 1, Name = "Nightlife" },

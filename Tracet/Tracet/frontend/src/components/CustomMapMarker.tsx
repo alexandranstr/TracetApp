@@ -3,11 +3,13 @@ import { View, StyleSheet, Image, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const PINK_ACCENT = '#FF2D55';
+const PINK_ACCENT = '#FF2D55';   
+const PURPLE_ACCENT = '#AF52DE'; 
 const DARK_BG = '#1C1C1E';
 
 export interface PinData {
     id: number;
+    userId?: string; 
     title: string;
     journalEntry: string;
     rating?: number;
@@ -30,14 +32,17 @@ export interface PinData {
 
 interface CustomMapMarkerProps {
     pin: PinData;
+    currentUserId?: string | null;
     zoomLevel?: number;
-    friendColor?: string;
 }
 
-function CustomMapMarker({ pin, zoomLevel = 0.05, friendColor = PINK_ACCENT }: CustomMapMarkerProps) {
+function CustomMapMarker({ pin, currentUserId, zoomLevel = 0.05 }: CustomMapMarkerProps) {
     const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
     const [imageError, setImageError] = useState(false);
 
+    // Determinăm culoarea: roz dacă e pin-ul tău, mov dacă e al unui prieten
+    const isMyPin = pin.userId === currentUserId;
+    const accentColor = isMyPin ? PINK_ACCENT : PURPLE_ACCENT;
 
     const photos: string[] = useMemo(() => {
         try {
@@ -89,7 +94,7 @@ function CustomMapMarker({ pin, zoomLevel = 0.05, friendColor = PINK_ACCENT }: C
                         width: baseSize,
                         height: baseSize,
                         borderRadius: baseSize / 2,
-                        borderColor: friendColor,
+                        borderColor: accentColor,
                         borderWidth: isZoomedOut ? 1.5 : 2.5,
                     },
                 ]}
@@ -108,19 +113,18 @@ function CustomMapMarker({ pin, zoomLevel = 0.05, friendColor = PINK_ACCENT }: C
                     <Ionicons
                         name={isCity ? 'business' : 'location'}
                         size={iconSize}
-                        color={friendColor}
+                        color={accentColor}
                     />
                 )}
             </View>
 
-
             {pin.overlapCount && pin.overlapCount > 1 && !isZoomedOut && (
-                <View style={[styles.badge, { backgroundColor: friendColor }]}>
+                <View style={[styles.badge, { backgroundColor: accentColor }]}>
                     <Text style={styles.badgeText}>+{pin.overlapCount}</Text>
                 </View>
             )}
 
-            {!isZoomedOut && <View style={[styles.pointer, { borderTopColor: friendColor }]} />}
+            {!isZoomedOut && <View style={[styles.pointer, { borderTopColor: accentColor }]} />}
         </View>
     );
 }

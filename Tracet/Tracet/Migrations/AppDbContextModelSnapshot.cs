@@ -372,13 +372,13 @@ namespace Tracet.Migrations
                     b.HasOne("Tracet.models.User", "Friend")
                         .WithMany()
                         .HasForeignKey("FriendId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Tracet.models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Friend");
