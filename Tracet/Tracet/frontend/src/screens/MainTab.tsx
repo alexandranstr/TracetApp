@@ -51,8 +51,26 @@ export default function MainTab({ navigation, route }: any) {
     const [inspectedPin, setInspectedPin] = useState<any | null>(null);
     const [boundaryPolygon, setBoundaryPolygon] = useState<{ latitude: number; longitude: number }[]>([]);
     const [isOverlayVisible, setIsOverlayVisible] = useState(false);
+    const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
     const MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+    const fetchPendingRequestsCount = async () => {
+        if (!currentUserId) return;
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/friendships/requests?userId=${currentUserId}`);
+            if (response.ok) {
+                const data = await response.json();
+                setPendingRequestsCount(data.count || 0);
+            }
+        } catch (err) {
+            console.log('Error fetching pending friend requests count:', err);
+        }
+    };
+
+    useEffect(() => {
+        fetchPendingRequestsCount();
+    }, [currentUserId]);
 
     useEffect(() => {
         const resolveUserId = async () => {
@@ -383,7 +401,7 @@ export default function MainTab({ navigation, route }: any) {
                                         tracksViewChanges={false}
                                         onPress={() => setInspectedPin(pin)}
                                     >
-                                        <CustomMapMarker pin={pin} />
+                                        <CustomMapMarker pin={pin} currentUserId={currentUserId} />
                                     </Marker>
                                 );
                             })}
@@ -423,8 +441,17 @@ export default function MainTab({ navigation, route }: any) {
                                 </View>
 
                                 <View style={styles.headerButtons}>
-                                    <TouchableOpacity style={styles.iconButton} onPress={() => navigation?.navigate('Friends')}>
+                                    <TouchableOpacity
+                                        style={styles.iconButton}
+                                        onPress={() => navigation?.navigate('Friends', { currentUserId })}>
                                         <Ionicons name="people" size={20} color="#FFFFFF" />
+                                        {pendingRequestsCount > 0 && (
+                                            <View style={styles.badgeContainer}>
+                                                <Text style={styles.badgeText}>
+                                                    {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                                                </Text>
+                                            </View>
+                                        )}
                                     </TouchableOpacity>
                                     <TouchableOpacity style={styles.iconButton} onPress={() => navigation?.navigate('Messages')}>
                                         <Ionicons name="chatbubbles" size={20} color="#FFFFFF" />
@@ -709,5 +736,24 @@ const styles = StyleSheet.create({
         borderRightColor: 'transparent',
         borderTopColor: PINK_ACCENT,
         marginTop: -1,
+    },
+    badgeContainer: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: PINK_ACCENT,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: DARK_BG,
+    },
+    badgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '800',
     },
 });

@@ -26,20 +26,19 @@ public class PinsController : ControllerBase
             return BadRequest("currentUserId query parameter is required.");
         }
 
-
-        var friendUserIds = await _context.Friendships
-            .Where(f => f.UserId == currentUserId || f.FriendId == currentUserId)
+        var acceptedFriendUserIds = await _context.Friendships
+            .Where(f => (f.UserId == currentUserId || f.FriendId == currentUserId) && f.Status == "Accepted")
             .Select(f => f.UserId == currentUserId ? f.FriendId : f.UserId)
             .ToListAsync();
-
 
         var visiblePins = await _context.Pins
             .Include(p => p.Location)
             .Include(p => p.User)
             .Where(p =>
+                
                 p.UserId == currentUserId
                 ||
-                (friendUserIds.Contains(p.UserId) && !p.IsPrivate)
+                (acceptedFriendUserIds.Contains(p.UserId) && !p.IsPrivate)
             )
             .OrderByDescending(p => p.VisitedAt)
             .Select(p => new

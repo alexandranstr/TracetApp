@@ -7,6 +7,7 @@ import SignUpScreen from './src/screens/SignUpScreen';
 import OnboardingSetupScreen from './src/screens/OnboardingSetupScreen';
 import SignInScreen from "./src/screens/SignInScreen";
 import MainTab from "./src/screens/MainTab";
+import FriendsScreen from "./src/screens/FriendsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -19,6 +20,7 @@ export default function App() {
                 <Stack.Screen name="SignIn" component={SignInScreen} />
                 <Stack.Screen name="OnboardingSetup" component={OnboardingSetupScreen} />
                 <Stack.Screen name="MainTab" component={MainTab} />
+                <Stack.Screen name="Friends" component={FriendsScreen} />
             </Stack.Navigator>
         </NavigationContainer>
     );
