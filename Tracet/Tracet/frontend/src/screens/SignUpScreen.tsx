@@ -56,20 +56,17 @@ export default function SignUpScreen({ navigation }: any) {
             const userCredential = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
             const dbUser = await syncUserWithBackend(userCredential.user);
 
-
             const resolvedUserId = dbUser?.id || userCredential.user.uid;
             await AsyncStorage.setItem('userId', resolvedUserId);
+
+            if (dbUser?.username) {
+                await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
+            }
 
             setIsLoading(false);
 
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
-            } else {
-
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTab' }],
-                });
             }
         } catch (error: any) {
             setIsLoading(false);
@@ -103,18 +100,15 @@ export default function SignUpScreen({ navigation }: any) {
 
             const dbUser = await syncUserWithBackend(userCredential.user);
 
-
             const resolvedUserId = dbUser?.id || userCredential.user.uid;
             await AsyncStorage.setItem('userId', resolvedUserId);
 
+            if (dbUser?.username) {
+                await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
+            }
+
             if (!dbUser?.username) {
                 navigation.navigate('OnboardingSetup');
-            } else {
-
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTab' }],
-                });
             }
         } catch (error: any) {
             if (
@@ -136,15 +130,37 @@ export default function SignUpScreen({ navigation }: any) {
 
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
-                    <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />
-                    <Path d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`} stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none" />
-                    <Path d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`} stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none" />
+                    <Path
+                        d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`}
+                        stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none"
+                    />
+                    <Path
+                        d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`}
+                        stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none"
+                    />
+                    <Path
+                        d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`}
+                        stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none"
+                    />
                     <Path d={`M ${width * 0.15} -20 L ${width * 0.85} ${height + 20}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
                     <Path d={`M ${width * 0.8} -20 L ${width * 0.1} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M ${width * 0.4} -20 L ${width * 0.95} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
+                    <Path d={`M ${width * 0.6} -20 L -20 ${height * 0.7}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.35} L ${width * 0.75} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.4" strokeOpacity="0.13" fill="none" />
+                    <Path d={`M -20 ${height * 0.08} L ${width + 20} ${height * 0.18}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.15} L ${width + 20} ${height * 0.35}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.38} L ${width + 20} ${height * 0.28}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.48} L ${width + 20} ${height * 0.62}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
                     <Path d={`M -20 ${height * 0.65} L ${width + 20} ${height * 0.8}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
+                    <Path d={`M -20 ${height * 0.82} L ${width * 0.6} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.92} L ${width + 20} ${height * 0.88}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.7} ${height * 0.3} L ${width + 20} ${height * 0.2}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.05} ${height * 0.02} L ${width * 0.45} ${height * 0.22}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.3} ${height * 0.55} L ${width * 0.85} ${height * 0.45}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.1} ${height * 0.75} L ${width * 0.5} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.6} ${height * 0.6} L ${width + 20} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.25} ${height * 0.12} L ${width * 0.8} ${height * 0.05}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
+                    <Path d={`M ${width * 0.45} ${height * 0.78} L ${width + 20} ${height * 0.72}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
                 </Svg>
             </View>
 

@@ -11,11 +11,13 @@ import {
     ScrollView,
     KeyboardAvoidingView,
     Platform,
-    Alert
+    Alert,
+    Modal,
+    ActivityIndicator
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { getAuth, signInWithCredential, GoogleAuthProvider, signInWithEmailAndPassword } from '@react-native-firebase/auth';
+import { getAuth, signInWithCredential, GoogleAuthProvider, signInWithEmailAndPassword, signInWithPhoneNumber, PhoneAuthProvider } from '@react-native-firebase/auth';
 import { syncUserWithBackend } from '../services/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -27,11 +29,67 @@ export default function SignInScreen({ navigation }: any) {
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    const [is2FaModalVisible, setIs2FaModalVisible] = useState(false);
+    const [smsCode, setSmsCode] = useState('');
+    const [confirmResult, setConfirmResult] = useState<any>(null);
+    const [verifyingSms, setVerifyingSms] = useState(false);
+    const [pendingDbUser, setPendingDbUser] = useState<any>(null);
+
     useEffect(() => {
         GoogleSignin.configure({
             webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
         });
     }, []);
+
+    const completeNavigation = async (dbUser: any) => {
+        if (dbUser?.username) {
+            await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
+        } else {
+            navigation.navigate('OnboardingSetup');
+        }
+    };
+
+    const handleProcessPostSignIn = async (dbUser: any) => {
+        if (dbUser?.isTwoFactorEnabled && dbUser?.phoneNumber) {
+            try {
+                const confirmation = await signInWithPhoneNumber(getAuth(), dbUser.phoneNumber);
+                setConfirmResult(confirmation);
+                setPendingDbUser(dbUser);
+                setIs2FaModalVisible(true);
+            } catch (error: any) {
+                Alert.alert('2FA Error', error.message || 'Could not send 2FA verification SMS.');
+            }
+        } else {
+            await completeNavigation(dbUser);
+        }
+    };
+
+    const handleVerify2FaCode = async () => {
+        if (!smsCode || smsCode.length < 6) {
+            Alert.alert('Invalid Code', 'Please enter the 6-digit SMS code.');
+            return;
+        }
+
+        try {
+            setVerifyingSms(true);
+            const credential = PhoneAuthProvider.credential(
+                confirmResult.verificationId,
+                smsCode
+            );
+
+            await signInWithCredential(getAuth(), credential);
+            setIs2FaModalVisible(false);
+            setSmsCode('');
+
+            if (pendingDbUser) {
+                await completeNavigation(pendingDbUser);
+            }
+        } catch (error: any) {
+            Alert.alert('Verification Failed', error.message || 'Invalid SMS code.');
+        } finally {
+            setVerifyingSms(false);
+        }
+    };
 
     const handleSignIn = async () => {
         const identifier = loginIdentifier.trim();
@@ -70,21 +128,11 @@ export default function SignInScreen({ navigation }: any) {
             const userCredential = await signInWithEmailAndPassword(getAuth(), targetEmail, password);
             const dbUser = await syncUserWithBackend(userCredential.user);
 
-
             const resolvedUserId = dbUser?.id || userCredential.user.uid;
             await AsyncStorage.setItem('userId', resolvedUserId);
 
             setIsLoading(false);
-
-            if (!dbUser?.username) {
-                navigation.navigate('OnboardingSetup');
-            } else {
-
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTab' }],
-                });
-            }
+            await handleProcessPostSignIn(dbUser);
         } catch (error: any) {
             setIsLoading(false);
             console.error('Sign-In Error:', error);
@@ -109,19 +157,10 @@ export default function SignInScreen({ navigation }: any) {
 
             const dbUser = await syncUserWithBackend(userCredential.user);
 
-
             const resolvedUserId = dbUser?.id || userCredential.user.uid;
             await AsyncStorage.setItem('userId', resolvedUserId);
 
-            if (!dbUser?.username) {
-                navigation.navigate('OnboardingSetup');
-            } else {
-
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTab' }],
-                });
-            }
+            await handleProcessPostSignIn(dbUser);
         } catch (error: any) {
             if (
                 error.code === statusCodes.SIGN_IN_CANCELLED ||
@@ -140,15 +179,37 @@ export default function SignInScreen({ navigation }: any) {
 
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
-                    <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />
-                    <Path d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`} stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none" />
-                    <Path d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`} stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none" />
+                    <Path
+                        d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`}
+                        stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none"
+                    />
+                    <Path
+                        d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`}
+                        stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none"
+                    />
+                    <Path
+                        d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`}
+                        stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none"
+                    />
                     <Path d={`M ${width * 0.15} -20 L ${width * 0.85} ${height + 20}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
                     <Path d={`M ${width * 0.8} -20 L ${width * 0.1} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M ${width * 0.4} -20 L ${width * 0.95} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
+                    <Path d={`M ${width * 0.6} -20 L -20 ${height * 0.7}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.35} L ${width * 0.75} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.4" strokeOpacity="0.13" fill="none" />
+                    <Path d={`M -20 ${height * 0.08} L ${width + 20} ${height * 0.18}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.15} L ${width + 20} ${height * 0.35}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.38} L ${width + 20} ${height * 0.28}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.48} L ${width + 20} ${height * 0.62}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
                     <Path d={`M -20 ${height * 0.65} L ${width + 20} ${height * 0.8}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
+                    <Path d={`M -20 ${height * 0.82} L ${width * 0.6} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.92} L ${width + 20} ${height * 0.88}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.7} ${height * 0.3} L ${width + 20} ${height * 0.2}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.05} ${height * 0.02} L ${width * 0.45} ${height * 0.22}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.3} ${height * 0.55} L ${width * 0.85} ${height * 0.45}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.1} ${height * 0.75} L ${width * 0.5} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.6} ${height * 0.6} L ${width + 20} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.25} ${height * 0.12} L ${width * 0.8} ${height * 0.05}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
+                    <Path d={`M ${width * 0.45} ${height * 0.78} L ${width + 20} ${height * 0.72}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
                 </Svg>
             </View>
 
@@ -254,6 +315,46 @@ export default function SignInScreen({ navigation }: any) {
                     </ScrollView>
                 </KeyboardAvoidingView>
             </SafeAreaView>
+
+            <Modal visible={is2FaModalVisible} animationType="slide" transparent={true}>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Two-Factor Verification</Text>
+                        <Text style={styles.modalSubtitle}>
+                            Enter the 6-digit SMS code sent to your phone.
+                        </Text>
+
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="123456"
+                            placeholderTextColor="#94A3B8"
+                            keyboardType="number-pad"
+                            maxLength={6}
+                            value={smsCode}
+                            onChangeText={setSmsCode}
+                        />
+
+                        <TouchableOpacity
+                            style={styles.primaryButtonModal}
+                            onPress={handleVerify2FaCode}
+                            disabled={verifyingSms}
+                        >
+                            {verifyingSms ? (
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.primaryButtonText}>Verify & Continue</Text>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.cancelButtonModal}
+                            onPress={() => setIs2FaModalVisible(false)}
+                        >
+                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -402,5 +503,63 @@ const styles = StyleSheet.create({
         color: '#FF4B82',
         fontWeight: '600',
         textDecorationLine: 'underline',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 24,
+    },
+    modalContent: {
+        width: '100%',
+        backgroundColor: '#1C1C1E',
+        borderRadius: 24,
+        padding: 24,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        marginBottom: 8,
+    },
+    modalSubtitle: {
+        fontSize: 13,
+        color: '#94A3B8',
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    modalInput: {
+        width: '100%',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        color: '#FFFFFF',
+        fontSize: 18,
+        textAlign: 'center',
+        letterSpacing: 4,
+        marginBottom: 20,
+    },
+    primaryButtonModal: {
+        width: '100%',
+        backgroundColor: '#FF4B82',
+        paddingVertical: 14,
+        borderRadius: 30,
+        alignItems: 'center',
+    },
+    cancelButtonModal: {
+        marginTop: 12,
+        paddingVertical: 10,
+    },
+    cancelButtonText: {
+        color: '#94A3B8',
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

@@ -1,3 +1,30 @@
+# Database files
 *.db
 *.db-shm
 *.db-wal
+
+# Firebase service account keys
+serviceAccountKey.json
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.development
+
+# Build output
+bin/
+obj/
+
+# IDE files
+*.userprefs
+*.suo
+*.user
+.vs/
+
+# Uploads directory
+uploads/
+
+# OS files
+.DS_Store
+Thumbs.db

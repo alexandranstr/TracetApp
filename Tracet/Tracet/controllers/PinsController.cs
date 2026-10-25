@@ -1,4 +1,6 @@
+using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Tracet.data;
@@ -9,6 +11,7 @@ namespace Tracet.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("global")]
 public class PinsController : ControllerBase
 {
     private readonly AppDbContext _context;
@@ -18,13 +21,37 @@ public class PinsController : ControllerBase
         _context = context;
     }
 
-    [HttpGet]
-    public async Task<IActionResult> GetPins([FromQuery] string currentUserId)
+    private async Task<(string? Uid, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
     {
-        if (string.IsNullOrEmpty(currentUserId))
+        var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest("currentUserId query parameter is required.");
+            return (null, Unauthorized(new { message = "Missing or invalid Authorization header." }));
         }
+
+        var idToken = authHeader.Substring("Bearer ".Length).Trim();
+
+        try
+        {
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            return (decodedToken.Uid, null);
+        }
+        catch (FirebaseAuthException ex)
+        {
+            Console.WriteLine($"[FIREBASE ERROR] Cod: {ex.ErrorCode} | Mesaj: {ex.Message}");
+            return (null, Unauthorized(new { message = "Invalid or expired token.", error = ex.Message, code = ex.ErrorCode }));
+        }
+        catch (Exception ex)
+        {
+            return (null, StatusCode(500, new { message = "Authentication error.", error = ex.Message }));
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetPins()
+    {
+        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
 
         var acceptedFriendUserIds = await _context.Friendships
             .Where(f => (f.UserId == currentUserId || f.FriendId == currentUserId) && f.Status == "Accepted")
@@ -35,7 +62,6 @@ public class PinsController : ControllerBase
             .Include(p => p.Location)
             .Include(p => p.User)
             .Where(p =>
-                
                 p.UserId == currentUserId
                 ||
                 (acceptedFriendUserIds.Contains(p.UserId) && !p.IsPrivate)
@@ -64,8 +90,11 @@ public class PinsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeletePin(int id, [FromQuery] string userId)
+    public async Task<IActionResult> DeletePin(int id)
     {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         var pin = await _context.Pins.FindAsync(id);
         if (pin == null) return NotFound();
 
@@ -80,8 +109,11 @@ public class PinsController : ControllerBase
     }
 
     [HttpPatch("{id}/visibility")]
-    public async Task<IActionResult> ToggleVisibility(int id, [FromQuery] string userId)
+    public async Task<IActionResult> ToggleVisibility(int id)
     {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         var pin = await _context.Pins
             .Include(p => p.Location)
             .Include(p => p.User)
@@ -96,7 +128,6 @@ public class PinsController : ControllerBase
 
         pin.IsPrivate = !pin.IsPrivate;
         await _context.SaveChangesAsync();
-
 
         return Ok(new
         {
@@ -117,15 +148,16 @@ public class PinsController : ControllerBase
         });
     }
 
-
     [HttpPost]
     public async Task<IActionResult> CreatePin([FromBody] CreatePinDto dto)
     {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         if (dto == null || dto.Location == null)
         {
             return BadRequest("Invalid pin or location data.");
         }
-
 
         Location? location = null;
 
@@ -145,7 +177,6 @@ public class PinsController : ControllerBase
                     Math.Abs(l.Longitude - dto.Location.Longitude) < 0.0001);
         }
 
-
         if (location == null)
         {
             location = new Location
@@ -163,7 +194,6 @@ public class PinsController : ControllerBase
             _context.Locations.Add(location);
             await _context.SaveChangesAsync();
         }
-
 
         if (!string.IsNullOrEmpty(dto.TagsVectorJson))
         {
@@ -203,19 +233,11 @@ public class PinsController : ControllerBase
             }
         }
 
-
-        var userId = dto.UserId;
-        if (string.IsNullOrEmpty(userId))
-        {
-            return BadRequest("UserId is required to create a pin.");
-        }
-
         var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
         {
             return NotFound($"User with ID '{userId}' does not exist in the database.");
         }
-
 
         var pin = new Pin
         {
@@ -226,7 +248,7 @@ public class PinsController : ControllerBase
             IsPrivate = dto.IsPrivate,
             VisitedAt = dto.VisitedAt,
             CreatedAt = DateTime.UtcNow,
-            UserId = userId,
+            UserId = userId!,
             LocationId = location.Id,
             PhotoUrlsJson = dto.PhotoUrlsJson ?? "[]",
             TagsVectorJson = dto.TagsVectorJson ?? "[]"
@@ -234,7 +256,6 @@ public class PinsController : ControllerBase
 
         _context.Pins.Add(pin);
         await _context.SaveChangesAsync();
-
 
         var responseDto = new PinResponseDto
         {
@@ -263,6 +284,6 @@ public class PinsController : ControllerBase
             }
         };
 
-        return CreatedAtAction(nameof(GetPins), new { currentUserId = pin.UserId }, responseDto);
+        return CreatedAtAction(nameof(GetPins), null, responseDto);
     }
 }

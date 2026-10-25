@@ -14,6 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useFonts, Caveat_700Bold } from '@expo-google-fonts/caveat';
+import { getAuth } from '@react-native-firebase/auth';
+import { API_BASE_URL } from '../config';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -49,6 +51,17 @@ export default function PinDetailOverlay({
 
     const isOwner = pin.userId === currentUserId;
 
+    const getAuthToken = async () => {
+        try {
+            const user = getAuth().currentUser;
+            if (user) {
+                return await user.getIdToken();
+            }
+        } catch (err) {
+            console.log('Error getting auth token:', err);
+        }
+        return null;
+    };
 
     const photoUris: string[] = (() => {
         try {
@@ -69,7 +82,6 @@ export default function PinDetailOverlay({
         }
     })();
 
-
     const handleDelete = () => {
         Alert.alert('Delete Pin', 'Are you sure you want to delete this memory?', [
             { text: 'Cancel', style: 'cancel' },
@@ -78,8 +90,12 @@ export default function PinDetailOverlay({
                 style: 'destructive',
                 onPress: async () => {
                     try {
-                        const res = await fetch(`http://localhost:5000/api/pins/${pin.id}?userId=${currentUserId}`, {
+                        const token = await getAuthToken();
+                        const res = await fetch(`${API_BASE_URL}/api/pins/${pin.id}`, {
                             method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
                         });
                         if (res.ok) {
                             onPinDeleted(pin.id);
@@ -93,12 +109,17 @@ export default function PinDetailOverlay({
         ]);
     };
 
-
     const handleToggleVisibility = async () => {
         try {
+            const token = await getAuthToken();
             const res = await fetch(
-                `http://localhost:5000/api/pins/${pin.id}/visibility?userId=${currentUserId}`,
-                { method: 'PATCH' }
+                `${API_BASE_URL}/api/pins/${pin.id}/visibility`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
             );
             if (res.ok) {
                 const data = await res.json();
@@ -118,7 +139,6 @@ export default function PinDetailOverlay({
                         <TouchableOpacity style={styles.iconBtn} onPress={onClose}>
                             <Ionicons name="close" size={20} color="#FFFFFF" />
                         </TouchableOpacity>
-
 
                         {isOwner && (
                             <View style={styles.ownerActions}>
@@ -146,7 +166,6 @@ export default function PinDetailOverlay({
                             {pin.title || 'Untitled Memory'}
                         </Text>
 
-
                         {photoUris.length > 0 ? (
                             <View style={styles.carouselContainer}>
                                 <FlatList
@@ -171,7 +190,6 @@ export default function PinDetailOverlay({
                                         </View>
                                     )}
                                 />
-
 
                                 <TouchableOpacity
                                     style={styles.likeButton}
@@ -206,7 +224,6 @@ export default function PinDetailOverlay({
                             </View>
                         )}
 
-
                         <View style={styles.userBadge}>
                             <View style={styles.avatarCircle}>
                                 <Ionicons name="person" size={12} color="#FFFFFF" />
@@ -216,13 +233,11 @@ export default function PinDetailOverlay({
                             </Text>
                         </View>
 
-
                         {pin.journalEntry ? (
                             <View style={styles.journalBox}>
                                 <Text style={styles.journalText}>{pin.journalEntry}</Text>
                             </View>
                         ) : null}
-
 
                         {pin.location?.address ? (
                             <View style={styles.locationFooter}>

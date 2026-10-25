@@ -10,7 +10,6 @@ import {
     SafeAreaView,
     ActivityIndicator,
     ScrollView,
-    Platform,
     StatusBar,
     Animated,
     Modal,
@@ -18,9 +17,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
+import { getAuth } from '@react-native-firebase/auth';
+import { API_BASE_URL } from '../config';
 
 const PINK_ACCENT = '#FF2D55';
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
 
 function AnimatedCard({ children, index, delay = 60 }: { children: React.ReactNode; index: number; delay?: number }) {
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -104,10 +104,26 @@ export default function FriendsScreen({ navigation, route }: any) {
 
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const fetchSocialData = async () => {
-        if (!currentUserId) return;
+    const getAuthToken = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/friendships/social-overview?userId=${currentUserId}`);
+            const user = getAuth().currentUser;
+            if (user) {
+                return await user.getIdToken();
+            }
+        } catch (err) {
+            console.log('Error getting auth token:', err);
+        }
+        return null;
+    };
+
+    const fetchSocialData = async () => {
+        try {
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/social-overview`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setFriends(data.friends || []);
@@ -121,7 +137,7 @@ export default function FriendsScreen({ navigation, route }: any) {
 
     useEffect(() => {
         fetchSocialData();
-    }, [currentUserId]);
+    }, []);
 
     const handleSearch = (text: string) => {
         setSearchQuery(text);
@@ -137,8 +153,13 @@ export default function FriendsScreen({ navigation, route }: any) {
         setIsSearching(true);
         searchTimeoutRef.current = setTimeout(async () => {
             try {
-                const url = `${API_BASE_URL}/api/friendships/search?q=${encodeURIComponent(text)}&currentUserId=${currentUserId}`;
-                const res = await fetch(url);
+                const token = await getAuthToken();
+                const url = `${API_BASE_URL}/api/friendships/search?q=${encodeURIComponent(text)}`;
+                const res = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
                 if (res.ok) {
                     const data = await res.json();
                     setSearchResults(data);
@@ -153,10 +174,14 @@ export default function FriendsScreen({ navigation, route }: any) {
 
     const sendFriendRequest = async (receiverId: string) => {
         try {
+            const token = await getAuthToken();
             const res = await fetch(`${API_BASE_URL}/api/friendships/request`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ senderId: currentUserId, receiverId }),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ receiverId }),
             });
 
             if (res.ok) {
@@ -172,10 +197,14 @@ export default function FriendsScreen({ navigation, route }: any) {
 
     const respondToRequest = async (senderId: string, action: 'accept' | 'decline') => {
         try {
+            const token = await getAuthToken();
             const res = await fetch(`${API_BASE_URL}/api/friendships/respond`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ currentUserId, senderId, action }),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ senderId, action }),
             });
 
             if (res.ok) {
@@ -212,7 +241,6 @@ export default function FriendsScreen({ navigation, route }: any) {
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="light-content" />
 
-            {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity
                     onPress={() => navigation.goBack()}
@@ -229,7 +257,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                 </View>
             </View>
 
-            {/* Search Bar */}
             <View style={[styles.searchBarContainer, isSearchFocused && styles.searchBarFocused]}>
                 <Ionicons
                     name="search"
@@ -257,7 +284,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                 ) : null}
             </View>
 
-            {/* Tabs */}
             {searchQuery.trim().length === 0 && (
                 <View style={styles.tabContainer}>
                     <TouchableOpacity
@@ -325,7 +351,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                 </View>
             )}
 
-            {/* Main Content */}
             {searchQuery.trim().length >= 1 ? (
                 <FlatList
                     data={searchResults}
@@ -391,7 +416,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                 />
             ) : (
                 <ScrollView contentContainerStyle={styles.listContainer}>
-                    {/* TAB 1: FRIENDS */}
                     {activeTab === 'friends' && (
                         <View>
                             {friends.length > 0 ? (
@@ -409,7 +433,18 @@ export default function FriendsScreen({ navigation, route }: any) {
                                             </View>
 
                                             <View style={styles.friendActions}>
-                                                <TouchableOpacity style={styles.iconChatBtn} activeOpacity={0.7}>
+                                                <TouchableOpacity
+                                                    style={styles.iconChatBtn}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => {
+                                                        navigation.navigate('ChatScreen', {
+                                                            partnerId: friend.id,
+                                                            partnerName: friend.displayName || friend.username,
+                                                            partnerPhoto: friend.photoUrl,
+                                                            currentUserId
+                                                        });
+                                                    }}
+                                                >
                                                     <Ionicons name="chatbubble-ellipses" size={18} color={PINK_ACCENT} />
                                                 </TouchableOpacity>
                                             </View>
@@ -430,7 +465,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                         </View>
                     )}
 
-                    {/* TAB 2: REQUESTS INCOMING */}
                     {activeTab === 'requests' && (
                         <View>
                             {incomingRequests.length > 0 ? (
@@ -480,7 +514,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                         </View>
                     )}
 
-                    {/* TAB 3: SENT REQUESTS OUTGOING */}
                     {activeTab === 'sent' && (
                         <View>
                             {outgoingRequests.length > 0 ? (
@@ -520,7 +553,6 @@ export default function FriendsScreen({ navigation, route }: any) {
                 </ScrollView>
             )}
 
-            {/* Modal Image View */}
             <Modal
                 visible={!!selectedImageUri}
                 transparent={true}
@@ -776,18 +808,20 @@ const styles = StyleSheet.create({
         width: 38,
         height: 38,
         borderRadius: 19,
-        backgroundColor: 'rgba(255, 45, 85, 0.12)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
     actionRow: {
         flexDirection: 'row',
         gap: 8,
     },
     actionBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -795,13 +829,14 @@ const styles = StyleSheet.create({
         backgroundColor: PINK_ACCENT,
     },
     declineBtn: {
-        backgroundColor: 'rgba(255, 255, 255, 0.09)',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     emptyStateContainer: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: 50,
-        gap: 8,
+        paddingVertical: 60,
     },
     emptyIconContainer: {
         width: 80,
@@ -810,7 +845,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 16,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.06)',
     },
@@ -818,6 +853,7 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '700',
+        marginBottom: 6,
     },
     emptyText: {
         color: '#71717A',
@@ -831,10 +867,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     fullCircleImage: {
-        width: 260,
-        height: 260,
-        borderRadius: 130,
-        borderWidth: 3,
-        borderColor: PINK_ACCENT,
-    },
+        width: 280,
+        height: 280,
+        borderRadius: 140,
+        borderWidth: 2,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    }
 });

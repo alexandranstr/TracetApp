@@ -1,6 +1,7 @@
 using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Tracet.data;
 using Tracet.models;
@@ -10,6 +11,7 @@ namespace Tracet.controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
@@ -18,10 +20,7 @@ public class AuthController : ControllerBase
     {
         _dbContext = dbContext;
     }
-
-    /// <summary>
-    /// Helper method to extract and verify the Firebase ID Token from the Authorization header.
-    /// </summary>
+    
     private async Task<(string? Uid, FirebaseToken? DecodedToken, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
     {
         var authHeader = Request.Headers["Authorization"].FirstOrDefault();
@@ -74,6 +73,8 @@ public class AuthController : ControllerBase
                     PhotoUrl = null,
                     HomeCountry = null,
                     PhoneNumber = null,
+                    IsTwoFactorEnabled = false,
+                    IsPhoneVerified = false,
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -118,7 +119,6 @@ public class AuthController : ControllerBase
         var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == uid);
         if (user == null) return NotFound(new { message = "User not found." });
 
-        // Handle Username updating
         if (!string.IsNullOrWhiteSpace(dto.Username))
         {
             string cleanUsername = dto.Username.Trim().ToLower().Replace(" ", "_");
@@ -136,22 +136,20 @@ public class AuthController : ControllerBase
             user.Username = cleanUsername;
         }
 
-        // Handle Display Name updating
         if (!string.IsNullOrWhiteSpace(dto.DisplayName))
         {
             user.DisplayName = dto.DisplayName.Trim();
         }
 
-        // Handle Photo URL updating (allows clearing photo by passing empty string)
         if (dto.PhotoUrl != null)
         {
             user.PhotoUrl = string.IsNullOrWhiteSpace(dto.PhotoUrl) ? null : dto.PhotoUrl.Trim();
         }
 
-        // Handle Phone Number updating
         if (dto.PhoneNumber != null)
         {
             user.PhoneNumber = string.IsNullOrWhiteSpace(dto.PhoneNumber) ? null : dto.PhoneNumber.Trim();
+            user.IsPhoneVerified = !string.IsNullOrWhiteSpace(user.PhoneNumber);
         }
 
         if (dto.HomeCountry != null)
@@ -163,6 +161,29 @@ public class AuthController : ControllerBase
         return Ok(user);
     }
 
+    [HttpPut("toggle-2fa")]
+    public async Task<IActionResult> ToggleTwoFactor([FromBody] ToggleTwoFactorDto dto)
+    {
+        var (uid, _, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        if (user == null) return NotFound(new { message = "User not found." });
+
+        if (dto.Enable)
+        {
+            if (string.IsNullOrWhiteSpace(user.PhoneNumber) || !user.IsPhoneVerified)
+            {
+                return BadRequest(new { message = "Please add and verify a phone number before enabling 2FA." });
+            }
+        }
+
+        user.IsTwoFactorEnabled = dto.Enable;
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(new { isTwoFactorEnabled = user.IsTwoFactorEnabled });
+    }
+
     [HttpDelete("account")]
     public async Task<IActionResult> DeleteAccount()
     {
@@ -171,22 +192,19 @@ public class AuthController : ControllerBase
 
         try
         {
-            // 1. Remove from database
             var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == uid);
             if (user != null)
             {
                 _dbContext.Users.Remove(user);
                 await _dbContext.SaveChangesAsync();
             }
-
-            // 2. Remove from Firebase Auth directly on server side (optional but recommended)
             try
             {
                 await FirebaseAuth.DefaultInstance.DeleteUserAsync(uid);
             }
             catch (FirebaseAuthException)
             {
-                // Ignored if client already deleted user from frontend SDK
+                
             }
 
             return Ok(new { message = "User account removed successfully." });
@@ -198,9 +216,11 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("resolve-email")]
-    [AllowAnonymous]
     public async Task<IActionResult> ResolveEmail([FromQuery] string username)
     {
+        var (_, _, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         if (string.IsNullOrWhiteSpace(username))
             return BadRequest(new { message = "Username required." });
 

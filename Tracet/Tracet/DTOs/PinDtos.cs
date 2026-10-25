@@ -10,7 +10,6 @@ public class CreatePinDto
     public int? Rating { get; set; }
     public bool IsPrivate { get; set; }
     public DateTime VisitedAt { get; set; }
-    public string UserId { get; set; } = string.Empty;
 
     public CreateLocationDto Location { get; set; } = null!;
     public string PhotoUrlsJson { get; set; } = "[]";
