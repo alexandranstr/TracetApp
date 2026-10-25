@@ -3,13 +3,13 @@ import { View, StyleSheet, Image, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const PINK_ACCENT = '#FF2D55';   
-const PURPLE_ACCENT = '#AF52DE'; 
+const PINK_ACCENT = '#FF2D55';
+const PURPLE_ACCENT = '#AF52DE';
 const DARK_BG = '#1C1C1E';
 
 export interface PinData {
     id: number;
-    userId?: string; 
+    userId?: string;
     title: string;
     journalEntry: string;
     rating?: number;
@@ -40,7 +40,6 @@ function CustomMapMarker({ pin, currentUserId, zoomLevel = 0.05 }: CustomMapMark
     const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
     const [imageError, setImageError] = useState(false);
 
-    // Determinăm culoarea: roz dacă e pin-ul tău, mov dacă e al unui prieten
     const isMyPin = pin.userId === currentUserId;
     const accentColor = isMyPin ? PINK_ACCENT : PURPLE_ACCENT;
 

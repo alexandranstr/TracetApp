@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -8,14 +8,15 @@ import {
     TextInput,
     FlatList,
     Dimensions,
-    Platform,
     Keyboard,
+    Platform,
 } from 'react-native';
 import MapView, { Marker, Polygon, MapPressEvent, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth } from '@react-native-firebase/auth';
+import { useFocusEffect } from '@react-navigation/native';
 
 import CreatePinOverlay, { LocationData } from '../components/CreatePinOverlay';
 import CustomMapMarker, { PinData } from '../components/CustomMapMarker';
@@ -26,7 +27,7 @@ const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#1C1C1E';
 
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+import { API_BASE_URL } from '../config';
 
 interface SelectedPoint {
     latitude: number;
@@ -52,13 +53,39 @@ export default function MainTab({ navigation, route }: any) {
     const [boundaryPolygon, setBoundaryPolygon] = useState<{ latitude: number; longitude: number }[]>([]);
     const [isOverlayVisible, setIsOverlayVisible] = useState(false);
     const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
+    const [totalUnreadMessages, setTotalUnreadMessages] = useState<number>(0);
+    const [isAuthSynced, setIsAuthSynced] = useState<boolean>(false);
 
     const MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-    const fetchPendingRequestsCount = async () => {
-        if (!currentUserId) return;
+    const getAuthToken = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/friendships/requests?userId=${currentUserId}`);
+            let currentUser = getAuth().currentUser;
+            if (!currentUser) {
+                const storedUserId = await AsyncStorage.getItem('userId');
+                if (storedUserId) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    currentUser = getAuth().currentUser;
+                }
+            }
+            if (!currentUser) return null;
+            return await currentUser.getIdToken(true);
+        } catch (err) {
+            console.log('Error getting auth token:', err);
+            return null;
+        }
+    };
+
+    const fetchPendingRequestsCount = async () => {
+        try {
+            const token = await getAuthToken();
+            if (!token) return;
+
+            const response = await fetch(`${API_BASE_URL}/api/friendships/requests`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             if (response.ok) {
                 const data = await response.json();
                 setPendingRequestsCount(data.count || 0);
@@ -68,32 +95,94 @@ export default function MainTab({ navigation, route }: any) {
         }
     };
 
-    useEffect(() => {
-        fetchPendingRequestsCount();
-    }, [currentUserId]);
+    const fetchUnreadMessagesCount = async () => {
+        try {
+            const token = await getAuthToken();
+            if (!token) return;
+
+            const res = await fetch(`${API_BASE_URL}/api/messages/conversations`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data)) {
+                    const count = data.reduce((acc: number, item: any) => acc + (item.unreadCount || 0), 0);
+                    setTotalUnreadMessages(count);
+                }
+            }
+        } catch (err) {
+            console.log('Error fetching unread messages count:', err);
+        }
+    };
+
+    const fetchSavedPins = async () => {
+        try {
+            const token = await getAuthToken();
+            if (!token) return;
+
+            const response = await fetch(`${API_BASE_URL}/api/pins`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setSavedPins(data);
+            }
+        } catch (error) {
+            console.log('Error fetching pins from backend:', error);
+        }
+    };
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!isAuthSynced) return;
+            fetchPendingRequestsCount();
+            fetchUnreadMessagesCount();
+            fetchSavedPins();
+        }, [isAuthSynced])
+    );
 
     useEffect(() => {
-        const resolveUserId = async () => {
-            if (currentUserId) return;
-
+        const initializeAppFlow = async () => {
             try {
-                const storedUserId = await AsyncStorage.getItem('userId');
-                if (storedUserId) {
-                    setCurrentUserId(storedUserId);
-                    return;
+                let currentUser = getAuth().currentUser;
+
+                if (!currentUser) {
+                    const storedUserId = await AsyncStorage.getItem('userId');
+                    if (storedUserId) {
+                        await new Promise(resolve => setTimeout(resolve, 600));
+                        currentUser = getAuth().currentUser;
+                    }
                 }
 
-                const firebaseUser = getAuth().currentUser;
-                if (firebaseUser?.uid) {
-                    setCurrentUserId(firebaseUser.uid);
-                    await AsyncStorage.setItem('userId', firebaseUser.uid);
+                if (currentUser) {
+                    const uid = currentUser.uid;
+                    setCurrentUserId(uid);
+                    await AsyncStorage.setItem('userId', uid);
+
+                    const token = await currentUser.getIdToken();
+                    const syncRes = await fetch(`${API_BASE_URL}/api/auth/sync`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    setIsAuthSynced(true);
+                } else {
+                    setIsAuthSynced(true);
                 }
             } catch (err) {
-                console.log('Error resolving current user ID:', err);
+                console.log('Error during auth initialization/sync:', err);
+                setIsAuthSynced(true);
             }
         };
 
-        resolveUserId();
+        initializeAppFlow();
     }, []);
 
     const applyCoordinateOffsets = (pins: PinData[]): PinData[] => {
@@ -127,23 +216,6 @@ export default function MainTab({ navigation, route }: any) {
         return applyCoordinateOffsets(savedPins);
     }, [savedPins]);
 
-    const fetchSavedPins = async () => {
-        if (!currentUserId) return;
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/pins?currentUserId=${currentUserId}`);
-            if (response.ok) {
-                const data = await response.json();
-                console.log('FETCHED PINS FROM SERVER:', JSON.stringify(data, null, 2));
-                setSavedPins(data);
-            } else {
-                console.log('Failed to fetch pins, status:', response.status);
-            }
-        } catch (error) {
-            console.log('Error fetching pins from backend:', error);
-        }
-    };
-
     const requestLocation = async () => {
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
@@ -166,10 +238,11 @@ export default function MainTab({ navigation, route }: any) {
     }, []);
 
     useEffect(() => {
-        if (currentUserId) {
-            fetchSavedPins();
-        }
-    }, [currentUserId]);
+        if (!isAuthSynced) return;
+        fetchSavedPins();
+        fetchPendingRequestsCount();
+        fetchUnreadMessagesCount();
+    }, [isAuthSynced]);
 
     const handleMapPress = (e: MapPressEvent) => {
         Keyboard.dismiss();
@@ -453,8 +526,18 @@ export default function MainTab({ navigation, route }: any) {
                                             </View>
                                         )}
                                     </TouchableOpacity>
-                                    <TouchableOpacity style={styles.iconButton} onPress={() => navigation?.navigate('Messages')}>
+                                    <TouchableOpacity
+                                        style={styles.iconButton}
+                                        onPress={() => navigation?.navigate('Messages', { currentUserId })}
+                                    >
                                         <Ionicons name="chatbubbles" size={20} color="#FFFFFF" />
+                                        {totalUnreadMessages > 0 && (
+                                            <View style={styles.badgeContainer}>
+                                                <Text style={styles.badgeText}>
+                                                    {totalUnreadMessages > 9 ? '9+' : totalUnreadMessages}
+                                                </Text>
+                                            </View>
+                                        )}
                                     </TouchableOpacity>
                                 </View>
                             </View>

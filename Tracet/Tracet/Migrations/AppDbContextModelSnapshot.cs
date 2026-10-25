@@ -51,11 +51,17 @@ namespace Tracet.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("BackgroundTheme")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LastMessage")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("LastMessageAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageColor")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("User1Id")
@@ -164,6 +170,9 @@ namespace Tracet.Migrations
 
                     b.Property<int>("ConversationId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
@@ -338,7 +347,13 @@ namespace Tracet.Migrations
                     b.Property<string>("HomeCountry")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsPhoneVerified")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsPrivateProfile")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsTwoFactorEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("PhoneNumber")

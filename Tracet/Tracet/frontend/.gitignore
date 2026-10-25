@@ -22,7 +22,11 @@ yarn-error.*
 .DS_Store
 *.pem
 
-.env*.local
+# Environment files - NEVER commit API keys or secrets
+.env
+.env.local
+.env.production
+.env.development
 
 *.tsbuildinfo
 

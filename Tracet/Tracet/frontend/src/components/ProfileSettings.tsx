@@ -11,21 +11,30 @@ import {
     Image,
     ActivityIndicator,
     Modal,
-    Platform,
     Linking,
     Clipboard,
+    Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getAuth, signOut, updatePassword, deleteUser } from '@react-native-firebase/auth';
+import {
+    getAuth,
+    signOut,
+    updatePassword,
+    deleteUser,
+    PhoneAuthProvider,
+    signInWithCredential,
+    signInWithPhoneNumber,
+    linkWithCredential 
+} from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import CountryPicker, { Country, CountryCode } from 'react-native-country-picker-modal';
 import * as FileSystem from 'expo-file-system/legacy';
+import { API_BASE_URL } from '../config';
 
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#1C1C1E';
 const CARD_BG = '#2C2C2E';
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
 
 interface ProfileSettingsProps {
     currentUserId: string | null;
@@ -42,12 +51,20 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
         email?: string;
         photoUrl?: string;
         phoneNumber?: string;
+        isTwoFactorEnabled?: boolean;
+        isPhoneVerified?: boolean;
     }>({});
 
     const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
     const [countryCode, setCountryCode] = useState<CountryCode>('RO');
     const [callingCode, setCallingCode] = useState('40');
     const [rawPhoneNumber, setRawPhoneNumber] = useState('');
+    const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
+
+    const [isVerificationModalVisible, setIsVerificationModalVisible] = useState(false);
+    const [verificationCode, setVerificationCode] = useState('');
+    const [confirmResult, setConfirmResult] = useState<any>(null);
+    const [verifyingCode, setVerifyingCode] = useState(false);
 
     const [isEditProfileVisible, setIsEditProfileVisible] = useState(false);
     const [editDisplayName, setEditDisplayName] = useState('');
@@ -62,14 +79,11 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
     const [updatingPassword, setUpdatingPassword] = useState(false);
     const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
 
-    // Funcție ajutătoare pentru a construi calea dinamică
     const getResolvedPhotoUri = (photoPath?: string) => {
         if (!photoPath) return null;
-        // Dacă este un URL de pe internet (ex: Google, Firebase Web Storage), îl lăsăm așa
         if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
             return photoPath;
         }
-        // Dacă este doar un nume de fișier local sau cale mai veche, extragem numele fișierului
         const fileName = photoPath.split('/').pop();
         return `${FileSystem.documentDirectory}${fileName}`;
     };
@@ -93,6 +107,8 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                         email: currentUser.email || data.email || 'No email',
                         photoUrl: data.photoUrl || currentUser.photoURL || '',
                         phoneNumber: data.phoneNumber || '',
+                        isTwoFactorEnabled: data.isTwoFactorEnabled || false,
+                        isPhoneVerified: data.isPhoneVerified || false,
                     });
                     setEditDisplayName(data.displayName || currentUser.displayName || '');
                     setEditUsername(data.username || '');
@@ -124,7 +140,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
         }
     };
 
-    const handleSavePhoneNumber = async () => {
+    const handleSendVerificationCode = async () => {
         let cleanedInput = rawPhoneNumber.trim().replace(/\s+/g, '');
 
         if (!cleanedInput) {
@@ -142,8 +158,48 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         try {
             setSavingPhone(true);
+            getAuth().settings.appVerificationDisabledForTesting = true;
+            const confirmation = await signInWithPhoneNumber(getAuth(), formattedPhone);
+
+            setConfirmResult(confirmation);
+            setPendingPhoneNumber(formattedPhone);
+            setIsPhoneModalVisible(false);
+            setIsVerificationModalVisible(true);
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Could not send verification SMS.');
+        } finally {
+            setSavingPhone(false);
+        }
+    };
+
+    const handleConfirmVerificationCode = async () => {
+        if (!verificationCode || verificationCode.length < 6) {
+            Alert.alert('Invalid Code', 'Please enter the 6-digit code received via SMS.');
+            return;
+        }
+
+        try {
+            setVerifyingCode(true);
+            const credential = PhoneAuthProvider.credential(
+                confirmResult.verificationId,
+                verificationCode
+            );
+
             const currentUser = getAuth().currentUser;
             if (!currentUser) throw new Error('No user authenticated.');
+
+            try {
+                await linkWithCredential(currentUser, credential);
+            } catch (linkError: any) {
+                if (linkError.code !== 'auth/provider-already-linked') {
+                    throw linkError;
+                }
+            }
+
+            const phoneToSend = pendingPhoneNumber;
+            if (!phoneToSend) {
+                throw new Error('Phone number is missing.');
+            }
 
             const idToken = await currentUser.getIdToken();
             const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
@@ -152,18 +208,62 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${idToken}`,
                 },
-                body: JSON.stringify({ phoneNumber: formattedPhone }),
+                body: JSON.stringify({ phoneNumber: phoneToSend }),
             });
 
-            if (!response.ok) throw new Error('Failed to update phone number.');
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.log('Server error details:', errorData);
+                throw new Error('Failed to update phone number on server.');
+            }
 
-            Alert.alert('Success', 'Phone number saved successfully!');
-            setUserData((prev) => ({ ...prev, phoneNumber: formattedPhone }));
-            setIsPhoneModalVisible(false);
+            setUserData(prev => ({
+                ...prev,
+                phoneNumber: phoneToSend,
+                isPhoneVerified: true
+            }));
+            setIsVerificationModalVisible(false);
+            setVerificationCode('');
+            Alert.alert('Success', 'Phone number verified and saved successfully!');
         } catch (error: any) {
-            Alert.alert('Error', error.message || 'Could not update phone number.');
+            Alert.alert('Error', error.message || 'Invalid verification code.');
         } finally {
-            setSavingPhone(false);
+            setVerifyingCode(false);
+        }
+    };
+
+    const handleToggle2FA = async (value: boolean) => {
+        if (value && (!userData.phoneNumber || !userData.isPhoneVerified)) {
+            Alert.alert('Phone Required', 'Please add and verify a phone number before enabling 2FA.', [
+                { text: 'Add Phone', onPress: handleOpenPhoneModal },
+                { text: 'Cancel', style: 'cancel' }
+            ]);
+            return;
+        }
+
+        try {
+            const currentUser = getAuth().currentUser;
+            if (!currentUser) return;
+            const idToken = await currentUser.getIdToken();
+
+            const response = await fetch(`${API_BASE_URL}/api/auth/toggle-2fa`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ enable: value }),
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                setUserData(prev => ({ ...prev, isTwoFactorEnabled: data.isTwoFactorEnabled }));
+                Alert.alert('Success', `2FA has been ${value ? 'enabled' : 'disabled'}.`);
+            } else {
+                Alert.alert('Error', data.message || 'Could not update 2FA setting.');
+            }
+        } catch (err) {
+            Alert.alert('Error', 'Could not update 2FA setting.');
         }
     };
 
@@ -175,7 +275,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
         }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsEditing: true,
             aspect: [1, 1],
             quality: 0.7,
@@ -183,8 +283,6 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         if (!result.canceled && result.assets[0]?.uri) {
             const pickerUri = result.assets[0].uri;
-
-            // Nume unic de fișier
             const fileName = `profile_${Date.now()}.jpg`;
             const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -193,8 +291,6 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                     from: pickerUri,
                     to: permanentUri,
                 });
-
-                // Trimitem DOAR numele fișierului către server/database
                 savePhotoUrl(fileName);
             } catch (err) {
                 console.log('Error saving image locally:', err);
@@ -341,14 +437,11 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                 style: 'destructive',
                 onPress: async () => {
                     try {
-                        await AsyncStorage.clear();
+                        await AsyncStorage.removeItem('userProfile');
                         await signOut(getAuth());
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'Welcome' }],
-                        });
                     } catch (err) {
                         console.log('Error signing out:', err);
+                        Alert.alert('Error', 'Failed to sign out. Please try again.');
                     }
                 },
             },
@@ -450,7 +543,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                             <Text style={styles.fieldLabel}>Phone Number</Text>
                             <Text style={[styles.fieldValue, !userData.phoneNumber && { color: '#8E8E93' }]}>
                                 {userData.phoneNumber && userData.phoneNumber.trim().length > 0
-                                    ? userData.phoneNumber
+                                    ? `${userData.phoneNumber} ${userData.isPhoneVerified ? '✓' : '(Unverified)'}`
                                     : 'Not provided'}
                             </Text>
                         </View>
@@ -470,6 +563,17 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                         <Text style={styles.actionText}>Change Password</Text>
                         <Ionicons name="chevron-forward" size={18} color="#8E8E93" />
                     </TouchableOpacity>
+
+                    <View style={styles.actionRow}>
+                        <Ionicons name="shield-checkmark" size={20} color="#FFFFFF" />
+                        <Text style={styles.actionText}>Two-Factor Authentication (SMS)</Text>
+                        <Switch
+                            value={userData.isTwoFactorEnabled || false}
+                            onValueChange={handleToggle2FA}
+                            trackColor={{ false: '#3A3A3C', true: PINK_ACCENT }}
+                            thumbColor="#FFFFFF"
+                        />
+                    </View>
                 </View>
 
                 <View style={styles.section}>
@@ -540,15 +644,49 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                             />
                         </View>
 
-                        <TouchableOpacity style={styles.primaryBtn} onPress={handleSavePhoneNumber} disabled={savingPhone}>
+                        <TouchableOpacity style={styles.primaryBtn} onPress={handleSendVerificationCode} disabled={savingPhone}>
                             {savingPhone ? (
                                 <ActivityIndicator size="small" color="#FFF" />
                             ) : (
-                                <Text style={styles.primaryBtnText}>Save Phone Number</Text>
+                                <Text style={styles.primaryBtnText}>Send SMS Code</Text>
                             )}
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsPhoneModalVisible(false)}>
+                            <Text style={styles.cancelBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal visible={isVerificationModalVisible} animationType="slide" transparent={true}>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Verify Phone Number</Text>
+                        <Text style={{ color: '#8E8E93', textAlign: 'center', marginBottom: 16, fontSize: 13 }}>
+                            Enter the 6-digit code sent via SMS to your phone.
+                        </Text>
+
+                        <Text style={styles.inputLabel}>Verification Code</Text>
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="123456"
+                            placeholderTextColor="#8E8E93"
+                            keyboardType="number-pad"
+                            maxLength={6}
+                            value={verificationCode}
+                            onChangeText={setVerificationCode}
+                        />
+
+                        <TouchableOpacity style={styles.primaryBtn} onPress={handleConfirmVerificationCode} disabled={verifyingCode}>
+                            {verifyingCode ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <Text style={styles.primaryBtnText}>Verify & Save</Text>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsVerificationModalVisible(false)}>
                             <Text style={styles.cancelBtnText}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
@@ -598,7 +736,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                         <View style={styles.passwordContainer}>
                             <TextInput
                                 style={styles.passwordInput}
-                                placeholder="New Password (1 Upper, 1 Number, 6+ chars)"
+                                placeholder="New Password"
                                 placeholderTextColor="#8E8E93"
                                 secureTextEntry={!showNewPassword}
                                 value={newPassword}
@@ -637,123 +775,59 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
             <Modal visible={isSupportModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
-                        <Ionicons name="mail" size={40} color={PINK_ACCENT} style={{ alignSelf: 'center', marginBottom: 12 }} />
                         <Text style={styles.modalTitle}>Contact Support</Text>
-                        <Text style={{ color: '#8E8E93', textAlign: 'center', marginBottom: 16, fontSize: 14 }}>
-                            Send your feedback or support inquiries to:
+                        <Text style={{ color: '#8E8E93', textAlign: 'center', marginBottom: 16 }}>
+                            For assistance, send an email to: alexandranistor735@yahoo.com
                         </Text>
-
-                        <View style={{ backgroundColor: CARD_BG, padding: 14, borderRadius: 12, marginBottom: 16 }}>
-                            <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600', textAlign: 'center' }}>
-                                alexandranistor735@yahoo.com
-                            </Text>
-                        </View>
-
                         <TouchableOpacity style={styles.primaryBtn} onPress={handleCopyEmail}>
-                            <Ionicons name="copy-outline" size={18} color="#FFF" style={{ marginRight: 8 }} />
                             <Text style={styles.primaryBtnText}>Copy Email Address</Text>
                         </TouchableOpacity>
-
                         <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsSupportModalVisible(false)}>
                             <Text style={styles.cancelBtnText}>Close</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
+
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#000000' },
-    loadingContainer: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' },
-    scrollContent: { paddingHorizontal: 20, paddingBottom: 100, paddingTop: 20 },
+    container: { flex: 1, backgroundColor: DARK_BG },
+    loadingContainer: { flex: 1, backgroundColor: DARK_BG, justifyContent: 'center', alignItems: 'center' },
+    scrollContent: { padding: 20 },
     profileHeader: { alignItems: 'center', marginBottom: 24 },
-    avatarWrapper: { position: 'relative' },
-    avatar: { width: 96, height: 96, borderRadius: 48, borderWidth: 2, borderColor: PINK_ACCENT },
-    avatarPlaceholder: { width: 96, height: 96, borderRadius: 48, backgroundColor: CARD_BG, justifyContent: 'center', alignItems: 'center' },
-    editBadge: { position: 'absolute', bottom: 2, right: 2, backgroundColor: PINK_ACCENT, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#000' },
-    displayName: { color: '#FFFFFF', fontSize: 20, fontWeight: '700', marginTop: 12 },
+    avatarWrapper: { position: 'relative', marginBottom: 12 },
+    avatar: { width: 90, height: 90, borderRadius: 45 },
+    avatarPlaceholder: { width: 90, height: 90, borderRadius: 45, backgroundColor: CARD_BG, justifyContent: 'center', alignItems: 'center' },
+    editBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: PINK_ACCENT, padding: 6, borderRadius: 12 },
+    displayName: { color: '#FFFFFF', fontSize: 22, fontWeight: '700' },
     username: { color: '#8E8E93', fontSize: 14, marginTop: 2 },
-    editProfileBtn: { marginTop: 10, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 16, backgroundColor: CARD_BG, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-    editProfileBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+    editProfileBtn: { marginTop: 12, backgroundColor: CARD_BG, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+    editProfileBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
     section: { marginBottom: 24 },
-    sectionTitle: { color: '#8E8E93', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
-    inputCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: DARK_BG, padding: 14, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+    sectionTitle: { color: '#8E8E93', fontSize: 12, fontWeight: '600', marginBottom: 8, marginLeft: 4 },
+    inputCard: { backgroundColor: CARD_BG, flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12, marginBottom: 10 },
     fieldIcon: { marginRight: 12 },
-    fieldLabel: { color: '#8E8E93', fontSize: 11, fontWeight: '600' },
+    fieldLabel: { color: '#8E8E93', fontSize: 12 },
     fieldValue: { color: '#FFFFFF', fontSize: 15, fontWeight: '500', marginTop: 2 },
     saveBadge: { backgroundColor: PINK_ACCENT, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    saveBadgeText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
-    actionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: DARK_BG, padding: 16, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-    actionText: { flex: 1, color: '#FFFFFF', fontSize: 15, fontWeight: '600', marginLeft: 12 },
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', paddingHorizontal: 20 },
-    modalContent: { backgroundColor: DARK_BG, padding: 20, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-    modalTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
-    inputLabel: { color: '#8E8E93', fontSize: 12, fontWeight: '600', marginBottom: 6 },
-    modalInput: { backgroundColor: CARD_BG, borderRadius: 12, padding: 14, color: '#FFFFFF', marginBottom: 12 },
-    phoneInputRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    countryPickerBadge: {
-        backgroundColor: CARD_BG,
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        height: 52,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    phoneTextInput: {
-        flex: 1,
-        backgroundColor: CARD_BG,
-        borderRadius: 14,
-        height: 52,
-        paddingHorizontal: 16,
-        color: '#FFFFFF',
-        fontSize: 16,
-        marginLeft: 10,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    passwordContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: CARD_BG,
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        marginBottom: 12,
-    },
-    passwordInput: {
-        flex: 1,
-        height: 48,
-        color: '#FFFFFF',
-    },
-    primaryBtn: {
-        backgroundColor: PINK_ACCENT,
-        paddingVertical: 14,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'row',
-        marginTop: 10,
-    },
-    primaryBtnText: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '700',
-    },
-    cancelBtn: {
-        paddingVertical: 12,
-        alignItems: 'center',
-        marginTop: 6,
-    },
-    cancelBtnText: {
-        color: '#8E8E93',
-        fontSize: 14,
-        fontWeight: '600',
-    },
+    saveBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+    actionRow: { backgroundColor: CARD_BG, flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 12, marginBottom: 10 },
+    actionText: { flex: 1, color: '#FFFFFF', fontSize: 15, fontWeight: '500', marginLeft: 12 },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+    modalContent: { width: '100%', backgroundColor: CARD_BG, borderRadius: 16, padding: 20 },
+    modalTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+    inputLabel: { color: '#8E8E93', fontSize: 12, marginBottom: 6 },
+    modalInput: { backgroundColor: DARK_BG, color: '#FFFFFF', padding: 12, borderRadius: 10, fontSize: 15, marginBottom: 16 },
+    phoneInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+    countryPickerBadge: { backgroundColor: DARK_BG, borderRadius: 10, paddingHorizontal: 10, height: 48, justifyContent: 'center', marginRight: 8 },
+    phoneTextInput: { flex: 1, backgroundColor: DARK_BG, color: '#FFFFFF', height: 48, borderRadius: 10, paddingHorizontal: 12, fontSize: 15 },
+    passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: DARK_BG, borderRadius: 10, paddingHorizontal: 12, marginBottom: 12 },
+    passwordInput: { flex: 1, color: '#FFFFFF', height: 48, fontSize: 15 },
+    primaryBtn: { backgroundColor: PINK_ACCENT, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+    cancelBtn: { height: 44, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    cancelBtnText: { color: '#8E8E93', fontSize: 15 }
 });

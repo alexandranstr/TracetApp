@@ -1,4 +1,6 @@
+using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Tracet.data;
 using Tracet.models;
@@ -7,6 +9,7 @@ namespace Tracet.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("global")]
 public class FriendshipsController : ControllerBase
 {
     private readonly AppDbContext _context;
@@ -16,9 +19,37 @@ public class FriendshipsController : ControllerBase
         _context = context;
     }
 
-    [HttpGet("search")]
-    public async Task<IActionResult> SearchUsers([FromQuery] string q, [FromQuery] string currentUserId)
+    private async Task<(string? Uid, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
     {
+        var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, Unauthorized(new { message = "Missing or invalid Authorization header." }));
+        }
+
+        var idToken = authHeader.Substring("Bearer ".Length).Trim();
+
+        try
+        {
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            return (decodedToken.Uid, null);
+        }
+        catch (FirebaseAuthException ex)
+        {
+            return (null, Unauthorized(new { message = "Invalid or expired token.", error = ex.Message }));
+        }
+        catch (Exception ex)
+        {
+            return (null, StatusCode(500, new { message = "Authentication error.", error = ex.Message }));
+        }
+    }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchUsers([FromQuery] string q)
+    {
+        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         if (string.IsNullOrWhiteSpace(q) || q.Length < 1) 
             return Ok(new List<object>());
 
@@ -77,10 +108,10 @@ public class FriendshipsController : ControllerBase
     }
 
     [HttpGet("social-overview")]
-    public async Task<IActionResult> GetSocialOverview([FromQuery] string userId)
+    public async Task<IActionResult> GetSocialOverview()
     {
-        if (string.IsNullOrEmpty(userId))
-            return BadRequest(new { message = "User ID is required." });
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
 
         var friendships = await _context.Friendships
             .Where(f => f.UserId == userId || f.FriendId == userId)
@@ -140,11 +171,14 @@ public class FriendshipsController : ControllerBase
     }
 
     [HttpGet("requests")]
-    public async Task<IActionResult> GetPendingRequests([FromQuery] string userId)
+    public async Task<IActionResult> GetPendingRequests()
     {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         var pendingRequests = await _context.Friendships
             .Include(f => f.User)
-            .Where(f => f.FriendId == userId && f.Status == "Pending")
+            .Where(f => f.FriendId == userId && (f.Status == "Pending" || f.Status == "pending"))
             .Select(f => new
             {
                 f.Id,
@@ -163,16 +197,25 @@ public class FriendshipsController : ControllerBase
     }
 
     [HttpPost("request")]
-    public async Task<IActionResult> SendRequest([FromBody] FriendRequestDto dto)
+    public async Task<IActionResult> SendRequest([FromBody] SendFriendRequestDto dto)
     {
-        if (dto.SenderId == dto.ReceiverId)
+        var (senderId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        if (senderId == dto.ReceiverId)
         {
             return BadRequest(new { message = "You cannot send a friend request to yourself." });
         }
+        
+        var receiverExists = await _context.Users.AnyAsync(u => u.Id == dto.ReceiverId);
+        if (!receiverExists)
+        {
+            return NotFound(new { message = "User not found." });
+        }
 
         var existing = await _context.Friendships.FirstOrDefaultAsync(f =>
-            (f.UserId == dto.SenderId && f.FriendId == dto.ReceiverId) ||
-            (f.UserId == dto.ReceiverId && f.FriendId == dto.SenderId));
+            (f.UserId == senderId && f.FriendId == dto.ReceiverId) ||
+            (f.UserId == dto.ReceiverId && f.FriendId == senderId));
 
         if (existing != null)
         {
@@ -182,7 +225,7 @@ public class FriendshipsController : ControllerBase
                 return BadRequest(new { message = "An active friend request already exists or you are already friends." });
             }
 
-            existing.UserId = dto.SenderId;
+            existing.UserId = senderId;
             existing.FriendId = dto.ReceiverId;
             existing.Status = "Pending";
             existing.RequestedAt = DateTime.UtcNow;
@@ -193,7 +236,7 @@ public class FriendshipsController : ControllerBase
         {
             var friendship = new Friendship
             {
-                UserId = dto.SenderId,
+                UserId = senderId,
                 FriendId = dto.ReceiverId,
                 Status = "Pending",
                 RequestedAt = DateTime.UtcNow
@@ -207,17 +250,39 @@ public class FriendshipsController : ControllerBase
     }
 
     [HttpPost("respond")]
-    public async Task<IActionResult> RespondToRequest([FromBody] RespondDto dto)
+    public async Task<IActionResult> RespondToRequest([FromBody] RespondRequestDto dto)
     {
+        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
         var request = await _context.Friendships.FirstOrDefaultAsync(f =>
-            f.UserId == dto.SenderId && f.FriendId == dto.CurrentUserId && f.Status == "Pending");
+            ((f.UserId == dto.SenderId && f.FriendId == currentUserId) ||
+             (f.UserId == currentUserId && f.FriendId == dto.SenderId)) && 
+            f.Status.ToLower() == "pending");
 
         if (request == null) 
-            return NotFound(new { message = "Friend request not found." });
+            return NotFound(new { message = "Friend request not found or already processed." });
 
         if (dto.Action.ToLower() == "accept")
         {
             request.Status = "Accepted";
+
+            var existingConv = await _context.Conversations.FirstOrDefaultAsync(c =>
+                (c.User1Id == dto.SenderId && c.User2Id == currentUserId) ||
+                (c.User1Id == currentUserId && c.User2Id == dto.SenderId));
+
+            if (existingConv == null)
+            {
+                var newConv = new Conversation
+                {
+                    User1Id = currentUserId,
+                    User2Id = dto.SenderId,
+                    LastMessage = "",
+                    LastMessageAt = DateTime.UtcNow
+                };
+
+                _context.Conversations.Add(newConv);
+            }
         }
         else
         {
@@ -229,7 +294,49 @@ public class FriendshipsController : ControllerBase
 
         return Ok(new { success = true, message = $"Request successfully {dto.Action.ToLower()}ed." });
     }
+
+    [HttpPost("sync-conversations")]
+    public async Task<IActionResult> SyncConversations()
+    {
+        var (_, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        var acceptedFriendships = await _context.Friendships
+            .Where(f => f.Status.ToLower() == "accepted")
+            .ToListAsync();
+
+        var existingConversations = await _context.Conversations.ToListAsync();
+        int addedCount = 0;
+
+        foreach (var f in acceptedFriendships)
+        {
+            bool exists = existingConversations.Any(c =>
+                (c.User1Id == f.UserId && c.User2Id == f.FriendId) ||
+                (c.User1Id == f.FriendId && c.User2Id == f.UserId));
+
+            if (!exists)
+            {
+                var newConv = new Conversation
+                {
+                    User1Id = f.UserId,
+                    User2Id = f.FriendId,
+                    LastMessage = "",
+                    LastMessageAt = DateTime.UtcNow
+                };
+                _context.Conversations.Add(newConv);
+                existingConversations.Add(newConv);
+                addedCount++;
+            }
+        }
+
+        if (addedCount > 0)
+        {
+            await _context.SaveChangesAsync();
+        }
+
+        return Ok(new { message = $"Synchronized successfully. Created {addedCount} conversations." });
+    }
 }
 
-public record FriendRequestDto(string SenderId, string ReceiverId);
-public record RespondDto(string CurrentUserId, string SenderId, string Action);
+public record SendFriendRequestDto(string ReceiverId);
+public record RespondRequestDto(string SenderId, string Action);

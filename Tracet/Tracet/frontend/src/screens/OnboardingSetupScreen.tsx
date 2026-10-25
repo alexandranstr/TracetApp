@@ -10,19 +10,20 @@ import {
     Dimensions,
     ScrollView,
     KeyboardAvoidingView,
-    Platform,
     Alert,
     Image,
     Modal,
-    FlatList
+    FlatList,
+    Platform
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import { API_BASE_URL } from '../config';
 
 const { width, height } = Dimensions.get('window');
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
 
 const COUNTRIES = [
     'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia', 'Austria',
@@ -93,6 +94,26 @@ export default function OnboardingSetupScreen({ navigation }: any) {
 
             const idToken = await currentUser.getIdToken(true);
 
+            let savedFileName: string | null = null;
+
+            if (photoUri && photoUri.startsWith('file://')) {
+                try {
+                    const fileName = `profile_${Date.now()}.jpg`;
+                    const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+
+                    await FileSystem.copyAsync({
+                        from: photoUri,
+                        to: permanentUri,
+                    });
+
+                    savedFileName = fileName;
+                } catch (err) {
+                    console.log('Error saving photo locally in onboarding:', err);
+                }
+            } else if (photoUri) {
+                savedFileName = photoUri;
+            }
+
             const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
                 method: 'PUT',
                 headers: {
@@ -103,7 +124,7 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                     displayName: fullName.trim(),
                     username: cleanUsername,
                     homeCountry: homeCountry,
-                    photoUrl: photoUri,
+                    photoUrl: savedFileName,
                 }),
             });
 
@@ -113,15 +134,11 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                 throw new Error(data.message || 'Could not complete profile setup.');
             }
 
-
             const resolvedUserId = data?.id || data?.userId || currentUser.uid;
             await AsyncStorage.setItem('userId', resolvedUserId);
+            await AsyncStorage.setItem('userProfile', JSON.stringify(data));
 
-
-            navigation.reset({
-                index: 0,
-                routes: [{ name: 'MainTab' }],
-            });
+            navigation.navigate('MainTab');
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Something went wrong while setting up your profile.');
         } finally {
@@ -139,15 +156,37 @@ export default function OnboardingSetupScreen({ navigation }: any) {
 
             <View style={styles.backgroundContainer} pointerEvents="none">
                 <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
-                    <Path d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`} stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none" />
-                    <Path d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`} stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none" />
-                    <Path d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`} stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none" />
+                    <Path
+                        d={`M -50 ${height * 0.22} C ${width * 0.35} ${height * 0.18}, ${width * 0.45} ${height * 0.42}, ${width + 50} ${height * 0.48}`}
+                        stroke="#EFEAE1" strokeWidth="2.8" strokeOpacity="0.18" fill="none"
+                    />
+                    <Path
+                        d={`M ${width * 0.38} ${height * 0.28} C ${width * 0.65} ${height * 0.32}, ${width * 0.75} ${height * 0.45}, ${width + 50} ${height * 0.58}`}
+                        stroke="#EFEAE1" strokeWidth="1.6" strokeOpacity="0.14" fill="none"
+                    />
+                    <Path
+                        d={`M -50 ${height * 0.70} C ${width * 0.3} ${height * 0.65}, ${width * 0.6} ${height * 0.85}, ${width + 50} ${height * 0.78}`}
+                        stroke="#EFEAE1" strokeWidth="2.2" strokeOpacity="0.16" fill="none"
+                    />
                     <Path d={`M ${width * 0.15} -20 L ${width * 0.85} ${height + 20}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
                     <Path d={`M ${width * 0.8} -20 L ${width * 0.1} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M ${width * 0.4} -20 L ${width * 0.95} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
+                    <Path d={`M ${width * 0.6} -20 L -20 ${height * 0.7}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.35} L ${width * 0.75} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.4" strokeOpacity="0.13" fill="none" />
+                    <Path d={`M -20 ${height * 0.08} L ${width + 20} ${height * 0.18}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.15} L ${width + 20} ${height * 0.35}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.38} L ${width + 20} ${height * 0.28}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
                     <Path d={`M -20 ${height * 0.48} L ${width + 20} ${height * 0.62}`} stroke="#EFEAE1" strokeWidth="1.8" strokeOpacity="0.14" fill="none" />
                     <Path d={`M -20 ${height * 0.65} L ${width + 20} ${height * 0.8}`} stroke="#EFEAE1" strokeWidth="2" strokeOpacity="0.15" fill="none" />
+                    <Path d={`M -20 ${height * 0.82} L ${width * 0.6} ${height + 20}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M -20 ${height * 0.92} L ${width + 20} ${height * 0.88}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.7} ${height * 0.3} L ${width + 20} ${height * 0.2}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.05} ${height * 0.02} L ${width * 0.45} ${height * 0.22}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.3} ${height * 0.55} L ${width * 0.85} ${height * 0.45}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.1} ${height * 0.75} L ${width * 0.5} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.2" strokeOpacity="0.1" fill="none" />
+                    <Path d={`M ${width * 0.6} ${height * 0.6} L ${width + 20} ${height * 0.95}`} stroke="#EFEAE1" strokeWidth="1.5" strokeOpacity="0.12" fill="none" />
+                    <Path d={`M ${width * 0.25} ${height * 0.12} L ${width * 0.8} ${height * 0.05}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
+                    <Path d={`M ${width * 0.45} ${height * 0.78} L ${width + 20} ${height * 0.72}`} stroke="#EFEAE1" strokeWidth="1.3" strokeOpacity="0.11" fill="none" />
                 </Svg>
             </View>
 

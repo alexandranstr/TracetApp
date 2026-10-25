@@ -1,7 +1,5 @@
 import { getAuth } from '@react-native-firebase/auth';
-import { Platform } from 'react-native';
-
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+import { API_BASE_URL } from '../config';
 
 export const syncUserWithBackend = async (firebaseUser: any) => {
     try {

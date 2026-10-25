@@ -10,23 +10,22 @@ import {
     SafeAreaView,
     Switch,
     Alert,
-    Platform,
     Image,
     ActivityIndicator,
+    Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat, ImageResult } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { getAuth } from '@react-native-firebase/auth';
+import { API_BASE_URL } from '../config';
 
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#121212';
 const CARD_BG = '#1C1C1E';
 const TEXT_MUTED = '#8E8E93';
-
-
-const API_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
 
 interface Tag {
     id: number;
@@ -72,6 +71,18 @@ export default function CreatePinOverlay({
     const [availableTags, setAvailableTags] = useState<Tag[]>([]);
     const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 
+    const getAuthToken = async () => {
+        try {
+            const user = getAuth().currentUser;
+            if (user) {
+                return await user.getIdToken();
+            }
+        } catch (err) {
+            console.log('Error getting auth token:', err);
+        }
+        return null;
+    };
+
     const resetForm = () => {
         setTitle('');
         setJournalEntry('');
@@ -92,13 +103,25 @@ export default function CreatePinOverlay({
     useEffect(() => {
         let isMounted = true;
 
-        if (visible) {
-            fetch(`${API_BASE_URL}/api/tags`)
-                .then((res) => (res.ok ? res.json() : []))
-                .then((data) => {
+        const fetchTags = async () => {
+            try {
+                const token = await getAuthToken();
+                const res = await fetch(`${API_BASE_URL}/api/tags`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                if (res.ok) {
+                    const data = await res.json();
                     if (isMounted) setAvailableTags(data);
-                })
-                .catch((error) => console.log('Error fetching tags:', error));
+                }
+            } catch (error) {
+                console.log('Error fetching tags:', error);
+            }
+        };
+
+        if (visible) {
+            fetchTags();
         } else {
             resetForm();
         }
@@ -115,7 +138,6 @@ export default function CreatePinOverlay({
             setSelectedTagIds([...selectedTagIds, id]);
         }
     };
-
 
     const saveImagePermanently = async (uri: string): Promise<string> => {
         try {
@@ -162,7 +184,6 @@ export default function CreatePinOverlay({
                             }
                         );
 
-
                         const permanentUri = await saveImagePermanently(manipulated.uri);
                         processedUris.push(permanentUri);
                     } catch (err) {
@@ -199,7 +220,6 @@ export default function CreatePinOverlay({
             isPrivate,
             visitedAt: visitedAt.toISOString(),
             createdAt: new Date().toISOString(),
-            userId: currentUserId,
             locationId: selectedLocation?.id || 0,
             location: selectedLocation ? {
                 latitude: selectedLocation.latitude,
@@ -216,9 +236,13 @@ export default function CreatePinOverlay({
         };
 
         try {
+            const token = await getAuthToken();
             const response = await fetch(`${API_BASE_URL}/api/pins`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify(pinPayload),
             });
 
@@ -274,7 +298,6 @@ export default function CreatePinOverlay({
                         </View>
                     )}
 
-
                     <Text style={styles.sectionTitle}>Title</Text>
                     <TextInput
                         style={styles.textInput}
@@ -283,7 +306,6 @@ export default function CreatePinOverlay({
                         value={title}
                         onChangeText={setTitle}
                     />
-
 
                     <Text style={styles.sectionTitle}>Photos</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
@@ -305,7 +327,6 @@ export default function CreatePinOverlay({
                         </TouchableOpacity>
                     </ScrollView>
 
-
                     <Text style={styles.sectionTitle}>Rating</Text>
                     <View style={styles.ratingRow}>
                         {[1, 2, 3, 4, 5].map((star) => (
@@ -319,7 +340,6 @@ export default function CreatePinOverlay({
                             </TouchableOpacity>
                         ))}
                     </View>
-
 
                     <Text style={styles.sectionTitle}>Visited Date</Text>
                     <TouchableOpacity
@@ -357,7 +377,6 @@ export default function CreatePinOverlay({
                         </View>
                     )}
 
-
                     {availableTags.length > 0 && (
                         <>
                             <Text style={styles.sectionTitle}>Tags</Text>
@@ -380,7 +399,6 @@ export default function CreatePinOverlay({
                         </>
                     )}
 
-
                     <Text style={styles.sectionTitle}>Memories & Notes</Text>
                     <TextInput
                         style={styles.journalInput}
@@ -391,7 +409,6 @@ export default function CreatePinOverlay({
                         value={journalEntry}
                         onChangeText={setJournalEntry}
                     />
-
 
                     <View style={styles.privacyRow}>
                         <View style={{ flex: 1 }}>

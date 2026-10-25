@@ -9,4 +9,6 @@ public class Conversation
     public DateTime LastMessageAt { get; set; } = DateTime.UtcNow;
 
     public List<Message> Messages { get; set; } = new();
+    public string? BackgroundTheme { get; set; } = "default";
+    public string? MessageColor { get; set; } = "#FF2D55";
 }
