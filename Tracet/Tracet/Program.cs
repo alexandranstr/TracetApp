@@ -55,8 +55,10 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(
                 "http://localhost:5000",
+                "http://localhost:5001",
                 "http://localhost:8081",
-                "http://10.0.2.2:5000"
+                "http://10.0.2.2:5000",
+                "http://10.0.2.2:5001"
             )
             .WithHeaders(
                 "Content-Type",
@@ -143,4 +145,6 @@ app.MapHub<ChatHub>("/chathub");
 
 app.MapGet("/", () => "Tracet API is running!");
 
-app.Run();
+var url = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5001";
+Console.WriteLine($"[Tracet] Starting server on {url}");
+app.Run(url);

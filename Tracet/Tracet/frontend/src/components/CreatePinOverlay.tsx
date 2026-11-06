@@ -23,13 +23,38 @@ import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
 
 const PINK_ACCENT = '#FF2D55';
+const PURPLE_ACCENT = '#AF52DE';
 const DARK_BG = '#121212';
 const CARD_BG = '#1C1C1E';
 const TEXT_MUTED = '#8E8E93';
 
+const CATEGORY_MAP: { [key: string]: { icon: string; color: string } } = {
+    'General':     { icon: 'earth-outline',    color: '#8E8E93' },
+    'Cafe':        { icon: 'cafe-outline',     color: '#A0522D' },
+    'Restaurant':  { icon: 'restaurant-outline', color: '#FF9500' },
+    'Museum':      { icon: 'museum-outline',   color: '#5AC8FA' },
+    'Park':        { icon: 'leaf-outline',     color: '#34C759' },
+    'Hotel':       { icon: 'bed-outline',      color: '#AF52DE' },
+    'Attraction':  { icon: 'flame-outline',    color: '#FF2D55' },
+    'Shop':        { icon: 'cart-outline',     color: '#FFD60A' },
+    'Transport':   { icon: 'bus-outline',      color: '#007AFF' },
+    'Nature':      { icon: 'flower-outline',   color: '#30D158' },
+    'Nightlife':   { icon: 'wine-outline',     color: '#FF375F' },
+    'Sports':      { icon: 'fitness-outline',  color: '#64D2FF' },
+    'Shopping':    { icon: 'shirt-outline',    color: '#FF9500' },
+    'Accommodation': { icon: 'home-outline',   color: '#30B0C7' },
+    'Landmark':    { icon: 'compass-outline',  color: '#FFD60A' },
+};
+
 interface Tag {
     id: number;
     name: string;
+}
+
+interface CategoryItem {
+    name: string;
+    icon: string;
+    color: string;
 }
 
 export interface LocationData {
@@ -71,6 +96,9 @@ export default function CreatePinOverlay({
     const [availableTags, setAvailableTags] = useState<Tag[]>([]);
     const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 
+    const [availableCategories, setAvailableCategories] = useState<CategoryItem[]>([]);
+    const [selectedCategory, setSelectedCategory] = useState<string>('General');
+
     const getAuthToken = async () => {
         try {
             const user = getAuth().currentUser;
@@ -91,6 +119,7 @@ export default function CreatePinOverlay({
         setVisitedAt(new Date());
         setPhotoUrls([]);
         setSelectedTagIds([]);
+        setSelectedCategory('General');
         setShowDatePicker(false);
         setIsSubmitting(false);
     };
@@ -103,25 +132,37 @@ export default function CreatePinOverlay({
     useEffect(() => {
         let isMounted = true;
 
-        const fetchTags = async () => {
+        const fetchData = async () => {
             try {
                 const token = await getAuthToken();
-                const res = await fetch(`${API_BASE_URL}/api/tags`, {
+
+                const tagsRes = await fetch(`${API_BASE_URL}/api/tags`, {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
                 });
-                if (res.ok) {
-                    const data = await res.json();
+                if (tagsRes.ok) {
+                    const data = await tagsRes.json();
                     if (isMounted) setAvailableTags(data);
                 }
+
+                const catsRes = await fetch(`${API_BASE_URL}/api/pins/categories`);
+                if (catsRes.ok) {
+                    const catNames = await catsRes.json();
+                    const categories = catNames.map((name: string) => ({
+                        name,
+                        icon: CATEGORY_MAP[name]?.icon || 'pricetag-outline',
+                        color: CATEGORY_MAP[name]?.color || '#8E8E93'
+                    }));
+                    if (isMounted) setAvailableCategories(categories);
+                }
             } catch (error) {
-                console.log('Error fetching tags:', error);
+                console.log('Error fetching data:', error);
             }
         };
 
         if (visible) {
-            fetchTags();
+            fetchData();
         } else {
             resetForm();
         }
@@ -216,6 +257,7 @@ export default function CreatePinOverlay({
         const pinPayload = {
             title,
             journalEntry,
+            category: selectedCategory,
             rating,
             isPrivate,
             visitedAt: visitedAt.toISOString(),
@@ -306,6 +348,25 @@ export default function CreatePinOverlay({
                         value={title}
                         onChangeText={setTitle}
                     />
+
+                    <Text style={styles.sectionTitle}>Category</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScrollView}>
+                        {availableCategories.map((cat) => {
+                            const isSelected = selectedCategory === cat.name;
+                            return (
+                                <TouchableOpacity
+                                    key={cat.name}
+                                    style={[styles.categoryChip, isSelected && styles.activeCategoryChip, isSelected && { borderColor: cat.color }]}
+                                    onPress={() => setSelectedCategory(cat.name)}
+                                >
+                                    <Ionicons name={cat.icon as any} size={18} color={isSelected ? cat.color : TEXT_MUTED} />
+                                    <Text style={[styles.categoryChipText, isSelected && { color: cat.color }]}>
+                                        {cat.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
 
                     <Text style={styles.sectionTitle}>Photos</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
@@ -510,6 +571,23 @@ const styles = StyleSheet.create({
     activeTagChip: { backgroundColor: PINK_ACCENT, borderColor: PINK_ACCENT },
     tagChipText: { fontSize: 13, color: '#FFFFFF' },
     activeTagChipText: { fontWeight: '600', color: '#FFFFFF' },
+    categoriesScrollView: { flexDirection: 'row', marginVertical: 4 },
+    categoryChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 20,
+        backgroundColor: CARD_BG,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.08)',
+        marginRight: 10,
+        gap: 6,
+    },
+    activeCategoryChip: {
+        backgroundColor: 'rgba(255,255,255,0.05)',
+    },
+    categoryChipText: { fontSize: 13, color: '#FFFFFF' },
     datePickerButton: {
         flexDirection: 'row',
         alignItems: 'center',

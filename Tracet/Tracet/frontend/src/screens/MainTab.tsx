@@ -22,6 +22,7 @@ import CreatePinOverlay, { LocationData } from '../components/CreatePinOverlay';
 import CustomMapMarker, { PinData } from '../components/CustomMapMarker';
 import PinDetailOverlay from '../components/PinDetailOverlay';
 import ProfileSettings from '../components/ProfileSettings';
+import JournalTab from '../components/JournalTab';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -34,6 +35,8 @@ interface SelectedPoint {
     longitude: number;
     title: string;
     subtitle?: string;
+    cityName?: string;
+    countryName?: string;
     googlePlaceId?: string;
     entityType?: number;
 }
@@ -244,15 +247,64 @@ export default function MainTab({ navigation, route }: any) {
         fetchUnreadMessagesCount();
     }, [isAuthSynced]);
 
-    const handleMapPress = (e: MapPressEvent) => {
+    const reverseGeocode = async (latitude: number, longitude: number) => {
+        try {
+            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${MAPS_API_KEY}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                let cityName = '';
+                let countryName = '';
+                const addressComponents = data.results[0].address_components || [];
+                for (const component of addressComponents) {
+                    const types = component.types || [];
+                    if (types.includes('locality') || types.includes('administrative_area_level_3')) {
+                        cityName = component.long_name;
+                    }
+                    if (types.includes('country')) {
+                        countryName = component.long_name;
+                    }
+                }
+                if (!cityName) {
+                    for (const component of addressComponents) {
+                        const types = component.types || [];
+                        if (types.includes('sublocality') || types.includes('political')) {
+                            cityName = component.long_name;
+                            break;
+                        }
+                    }
+                }
+                const formattedAddress = data.results[0].formatted_address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                return { cityName, countryName, formattedAddress };
+            }
+        } catch (err) {
+            console.log('Reverse geocoding error:', err);
+        }
+        return { cityName: '', countryName: '', formattedAddress: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` };
+    };
+
+    const handleMapPress = async (e: MapPressEvent) => {
         Keyboard.dismiss();
         const { latitude, longitude } = e.nativeEvent.coordinate;
-        setSelectedPoint({
+
+        const placeholderPoint = {
             latitude,
             longitude,
             title: 'Dropped Pin',
             subtitle: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
             entityType: 0,
+        };
+
+        const { cityName, countryName, formattedAddress } = await reverseGeocode(latitude, longitude);
+
+        setSelectedPoint({
+            latitude,
+            longitude,
+            title: cityName || 'Dropped Pin',
+            subtitle: formattedAddress,
+            cityName,
+            countryName,
+            entityType: cityName ? 1 : 0,
         });
         setBoundaryPolygon([]);
         setSearchResults([]);
@@ -346,11 +398,35 @@ export default function MainTab({ navigation, route }: any) {
                 const placeTypes: string[] = data.result.types || [];
                 const entityType = inferEntityType(placeTypes);
 
+                let cityName = '';
+                let countryName = '';
+                const addressComponents = data.result.address_components || [];
+                for (const component of addressComponents) {
+                    const types = component.types || [];
+                    if (types.includes('locality') || types.includes('administrative_area_level_3')) {
+                        cityName = component.long_name;
+                    }
+                    if (types.includes('country')) {
+                        countryName = component.long_name;
+                    }
+                }
+                if (!cityName) {
+                    for (const component of addressComponents) {
+                        const types = component.types || [];
+                        if (types.includes('sublocality') || types.includes('political')) {
+                            cityName = component.long_name;
+                            break;
+                        }
+                    }
+                }
+
                 const newPoint = {
                     latitude: lat,
                     longitude: lng,
                     title: mainText,
                     subtitle: data.result.formatted_address,
+                    cityName,
+                    countryName,
                     googlePlaceId: placeId,
                     entityType,
                 };
@@ -400,6 +476,8 @@ export default function MainTab({ navigation, route }: any) {
             longitude: selectedPoint.longitude,
             placeName: selectedPoint.title,
             address: selectedPoint.subtitle,
+            cityName: selectedPoint.cityName || '',
+            countryName: selectedPoint.countryName || '',
             googlePlaceId: selectedPoint.googlePlaceId,
             entityType: selectedPoint.entityType ?? 0,
         }
@@ -417,11 +495,11 @@ export default function MainTab({ navigation, route }: any) {
                 );
             case 'Journal':
                 return (
-                    <SafeAreaView style={styles.tabViewContainer}>
-                        <Ionicons name="book" size={48} color={PINK_ACCENT} />
-                        <Text style={styles.tabTitle}>Travel Journal</Text>
-                        <Text style={styles.tabSubtitle}>Document your trips, photos, and memories.</Text>
-                    </SafeAreaView>
+                    <JournalTab
+                        key={activeTab}
+                        currentUserId={currentUserId}
+                        onPinUpdated={fetchSavedPins}
+                    />
                 );
             case 'Profile':
                 return (
