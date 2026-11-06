@@ -57,3 +57,13 @@ public class LocationResponseDto
     public int EntityType { get; set; }
     public string? GooglePlaceId { get; set; }
 }
+
+public class UpdatePinDto
+{
+    public string? Title { get; set; }
+    public string? JournalEntry { get; set; }
+    public string? Category { get; set; }
+    public int? Rating { get; set; }
+    public bool? IsPrivate { get; set; }
+    public string? PhotoUrlsJson { get; set; }
+}
