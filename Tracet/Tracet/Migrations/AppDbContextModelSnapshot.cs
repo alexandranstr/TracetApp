@@ -142,6 +142,108 @@ namespace Tracet.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Locations");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 7,
+                            CityName = "Tokyo",
+                            CountryName = "Japan",
+                            EntityType = 0,
+                            Latitude = 35.6586,
+                            Longitude = 139.74539999999999,
+                            PlaceName = "Tokyo Tower"
+                        },
+                        new
+                        {
+                            Id = 8,
+                            CityName = "New York",
+                            CountryName = "USA",
+                            EntityType = 0,
+                            Latitude = 40.782899999999998,
+                            Longitude = -73.965400000000002,
+                            PlaceName = "Central Park"
+                        },
+                        new
+                        {
+                            Id = 9,
+                            CityName = "Barcelona",
+                            CountryName = "Spain",
+                            EntityType = 0,
+                            Latitude = 41.403599999999997,
+                            Longitude = 2.1743999999999999,
+                            PlaceName = "Sagrada Familia"
+                        },
+                        new
+                        {
+                            Id = 10,
+                            CityName = "Sydney",
+                            CountryName = "Australia",
+                            EntityType = 0,
+                            Latitude = -33.8568,
+                            Longitude = 151.21530000000001,
+                            PlaceName = "Sydney Opera House"
+                        },
+                        new
+                        {
+                            Id = 11,
+                            CityName = "Cusco",
+                            CountryName = "Peru",
+                            EntityType = 0,
+                            Latitude = -13.1631,
+                            Longitude = -72.545000000000002,
+                            PlaceName = "Machu Picchu"
+                        },
+                        new
+                        {
+                            Id = 12,
+                            CityName = "Santorini",
+                            CountryName = "Greece",
+                            EntityType = 0,
+                            Latitude = 36.3932,
+                            Longitude = 25.461500000000001,
+                            PlaceName = "Santorini"
+                        },
+                        new
+                        {
+                            Id = 13,
+                            CityName = "Bangkok",
+                            CountryName = "Thailand",
+                            EntityType = 0,
+                            Latitude = 13.7563,
+                            Longitude = 100.5018,
+                            PlaceName = "Bangkok"
+                        },
+                        new
+                        {
+                            Id = 14,
+                            CityName = "Lisbon",
+                            CountryName = "Portugal",
+                            EntityType = 0,
+                            Latitude = 38.722299999999997,
+                            Longitude = -9.1393000000000004,
+                            PlaceName = "Lisbon"
+                        },
+                        new
+                        {
+                            Id = 15,
+                            CityName = "Cape Town",
+                            CountryName = "South Africa",
+                            EntityType = 0,
+                            Latitude = -33.924900000000001,
+                            Longitude = 18.424099999999999,
+                            PlaceName = "Cape Town"
+                        },
+                        new
+                        {
+                            Id = 16,
+                            CityName = "Reykjavik",
+                            CountryName = "Iceland",
+                            EntityType = 0,
+                            Latitude = 64.146600000000007,
+                            Longitude = -21.942599999999999,
+                            PlaceName = "Reykjavik"
+                        });
                 });
 
             modelBuilder.Entity("Tracet.models.LocationTag", b =>
@@ -160,6 +262,248 @@ namespace Tracet.Migrations
                     b.HasIndex("TagId");
 
                     b.ToTable("LocationTags");
+
+                    b.HasData(
+                        new
+                        {
+                            LocationId = 7,
+                            TagId = 11,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 7,
+                            TagId = 8,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 7,
+                            TagId = 1,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 7,
+                            TagId = 12,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 8,
+                            TagId = 9,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 8,
+                            TagId = 5,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 8,
+                            TagId = 4,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 8,
+                            TagId = 7,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 9,
+                            TagId = 6,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 9,
+                            TagId = 11,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 9,
+                            TagId = 7,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 9,
+                            TagId = 3,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 10,
+                            TagId = 11,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 10,
+                            TagId = 7,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 10,
+                            TagId = 6,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 10,
+                            TagId = 2,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 11,
+                            TagId = 12,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 11,
+                            TagId = 6,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 11,
+                            TagId = 9,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 11,
+                            TagId = 7,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 12,
+                            TagId = 2,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 12,
+                            TagId = 7,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 12,
+                            TagId = 8,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 12,
+                            TagId = 5,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 13,
+                            TagId = 8,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 13,
+                            TagId = 1,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 13,
+                            TagId = 10,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 13,
+                            TagId = 11,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 14,
+                            TagId = 3,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 14,
+                            TagId = 8,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 14,
+                            TagId = 6,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 14,
+                            TagId = 2,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 15,
+                            TagId = 12,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 15,
+                            TagId = 9,
+                            TagCount = 5
+                        },
+                        new
+                        {
+                            LocationId = 15,
+                            TagId = 7,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 15,
+                            TagId = 10,
+                            TagCount = 2
+                        },
+                        new
+                        {
+                            LocationId = 16,
+                            TagId = 9,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 16,
+                            TagId = 12,
+                            TagCount = 4
+                        },
+                        new
+                        {
+                            LocationId = 16,
+                            TagId = 3,
+                            TagCount = 3
+                        },
+                        new
+                        {
+                            LocationId = 16,
+                            TagId = 5,
+                            TagCount = 3
+                        });
                 });
 
             modelBuilder.Entity("Tracet.models.Message", b =>

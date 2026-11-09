@@ -13,6 +13,7 @@ import FriendsScreen from "./src/screens/FriendsScreen";
 import ChatScreen from "./src/screens/ChatScreen";
 import ConversationsScreen from "./src/screens/ConversationsScreen";
 import { API_BASE_URL } from './src/config';
+import AiChatScreen from "./src/screens/AiChatScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -103,6 +104,7 @@ export default function App() {
                 <Stack.Screen name="Friends" component={FriendsScreen} />
                 <Stack.Screen name="Messages" component={ConversationsScreen} />
                 <Stack.Screen name="ChatScreen" component={ChatScreen} />
+                <Stack.Screen name="AiChatScreen" component={AiChatScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
     );
