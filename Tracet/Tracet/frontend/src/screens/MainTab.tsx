@@ -23,6 +23,7 @@ import CustomMapMarker, { PinData } from '../components/CustomMapMarker';
 import PinDetailOverlay from '../components/PinDetailOverlay';
 import ProfileSettings from '../components/ProfileSettings';
 import JournalTab from '../components/JournalTab';
+import AiChatScreen from './AiChatScreen';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -246,6 +247,7 @@ export default function MainTab({ navigation, route }: any) {
         fetchPendingRequestsCount();
         fetchUnreadMessagesCount();
     }, [isAuthSynced]);
+
 
     const reverseGeocode = async (latitude: number, longitude: number) => {
         try {
@@ -487,11 +489,11 @@ export default function MainTab({ navigation, route }: any) {
         switch (activeTab) {
             case 'AIChat':
                 return (
-                    <SafeAreaView style={styles.tabViewContainer}>
-                        <Ionicons name="sparkles" size={48} color={PINK_ACCENT} />
-                        <Text style={styles.tabTitle}>AI Travel Assistant</Text>
-                        <Text style={styles.tabSubtitle}>Ask for trip recommendations and itineraries.</Text>
-                    </SafeAreaView>
+                    <AiChatScreen
+                        key={activeTab}
+                        navigation={navigation}
+                        route={{ params: { currentUserId } }}
+                    />
                 );
             case 'Journal':
                 return (
@@ -571,6 +573,7 @@ export default function MainTab({ navigation, route }: any) {
                                     </View>
                                 </Marker>
                             )}
+
                         </MapView>
 
                         <SafeAreaView style={styles.headerOverlay}>
