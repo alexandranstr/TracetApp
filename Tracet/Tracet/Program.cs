@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Tokens;
 using Tracet.data;
 using Tracet.hubs;
 
+Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
 var builder = WebApplication.CreateBuilder(args);
 
 if (FirebaseApp.DefaultInstance == null)
@@ -101,6 +102,7 @@ builder.Services.AddRateLimiter(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getAuth } from '@react-native-firebase/auth';
+import Markdown from 'react-native-markdown-display';
 import { API_BASE_URL } from '../config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -41,22 +42,16 @@ interface Recommendation {
     longitude: number;
 }
 
-const QUICK_CHIPS = [
-    'Recommend me a quiet place',
-    'I want a nature adventure',
-    'What are good cafes nearby?'
-];
 
 export default function AiChatScreen({ navigation, route }: any) {
     const currentUserId = route?.params?.currentUserId;
 
-    const [messages, setMessages] = useState<Message[]>([
-        { id: '1', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }
-    ]);
+    const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
     const [loading, setLoading] = useState(false);
     const [currentRecommendation, setCurrentRecommendation] = useState<Recommendation | null>(null);
     const [tags, setTags] = useState<Tag[]>([]);
+    const [aiProvider, setAiProvider] = useState<'gemini' | 'tracey'>('gemini');
     const scrollViewRef = useRef<ScrollView>(null);
 
     const getAuthToken = async () => {
@@ -88,6 +83,37 @@ export default function AiChatScreen({ navigation, route }: any) {
             console.log('Error fetching tags:', err);
         }
     };
+
+    const fetchChatHistory = useCallback(async () => {
+        try {
+            const token = await getAuthToken();
+            if (!token) {
+                setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+                return;
+            }
+            const response = await fetch(`${API_BASE_URL}/api/ai/history`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const msgs: Message[] = data.map((item: any) => ({
+                    id: item.id,
+                    sender: item.sender === 'user' ? 'user' : 'ai',
+                    text: item.text
+                }));
+                if (msgs.length === 0) {
+                    setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+                } else {
+                    setMessages(msgs);
+                }
+            } else {
+                setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+            }
+        } catch (err) {
+            console.log('Error fetching chat history:', err);
+            setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+        }
+    }, []);
 
     const fetchRecommendations = useCallback(async () => {
         try {
@@ -155,12 +181,14 @@ export default function AiChatScreen({ navigation, route }: any) {
     useEffect(() => {
         fetchTags();
         fetchRecommendations();
-    }, [fetchRecommendations]);
+        fetchChatHistory();
+    }, [fetchRecommendations, fetchChatHistory]);
 
     useFocusEffect(
         useCallback(() => {
             fetchRecommendations();
-        }, [fetchRecommendations])
+            fetchChatHistory();
+        }, [fetchRecommendations, fetchChatHistory])
     );
 
     const handleSend = async (textToSend?: string) => {
@@ -172,15 +200,49 @@ export default function AiChatScreen({ navigation, route }: any) {
         if (!textToSend) setInputText('');
         setLoading(true);
 
-        setTimeout(() => {
-            const aiMsg: Message = {
+        try {
+            const token = await getAuthToken();
+            if (!token) {
+                setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), sender: 'ai', text: 'Authentication error. Please try logging in again.' }]);
+                setLoading(false);
+                return;
+            }
+
+            const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ message: text.trim() })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const aiMsg: Message = {
+                    id: (Date.now() + 1).toString(),
+                    sender: 'ai',
+                    text: data.response
+                };
+                setMessages(prev => [...prev, aiMsg]);
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                setMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    sender: 'ai',
+                    text: errorData.message || 'Sorry, I encountered an error. Please try again.'
+                }]);
+            }
+        } catch (err) {
+            console.log('Error sending message to AI:', err);
+            setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
                 sender: 'ai',
-                text: `Got it! Based on your preferences, I've updated the recommendation above for you.`
-            };
-            setMessages(prev => [...prev, aiMsg]);
+                text: 'Sorry, I couldn\'t reach the AI service. Please check your connection and try again.'
+            }]);
+        } finally {
             setLoading(false);
-        }, 1000);
+        }
     };
 
 
@@ -188,16 +250,9 @@ export default function AiChatScreen({ navigation, route }: any) {
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="light-content" />
 
-            <View style={styles.header}>
-                <View style={styles.headerTitleContainer}>
-                    <Ionicons name="sparkles" size={18} color={PINK_ACCENT} style={{ marginRight: 8 }} />
-                    <Text style={styles.headerTitle}>Tracet AI</Text>
-                </View>
-            </View>
-
             <KeyboardAvoidingView style={styles.keyboardView} behavior="padding">
                 {currentRecommendation && (
-                    <View style={styles.recommendationCard}>
+                    <View style={[styles.recommendationCard, styles.recommendationCardSpacing]}>
                         <View style={styles.recHeaderRow}>
                             <View style={styles.recBadge}>
                                 <Ionicons name="compass" size={12} color={PINK_ACCENT} />
@@ -244,9 +299,30 @@ export default function AiChatScreen({ navigation, route }: any) {
                                     </View>
                                 )}
                                 <View style={[styles.bubble, isAi ? styles.bubbleAi : styles.bubbleUser]}>
-                                    <Text style={[styles.bubbleText, isAi ? styles.textAi : styles.textUser]}>
-                                        {msg.text}
-                                    </Text>
+                                    {isAi ? (
+                                        <Markdown
+                                            style={{
+                                                body: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+                                                heading1: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+                                                heading2: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+                                                heading3: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', marginTop: 6, marginBottom: 4 },
+                                                strong: { color: '#FFFFFF', fontWeight: '700' },
+                                                em: { color: '#FFFFFF', fontStyle: 'italic' },
+                                                list_item: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+                                                paragraph: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+                                                blockquote: { color: '#A1A1AA', fontStyle: 'italic', borderLeftWidth: 2, borderLeftColor: PINK_ACCENT, paddingLeft: 8 },
+                                                code: { color: '#FF2D55', backgroundColor: 'rgba(255,45,85,0.1)', fontFamily: 'monospace', fontSize: 12 },
+                                                code_inline: { color: '#FF2D55', backgroundColor: 'rgba(255,45,85,0.1)', fontFamily: 'monospace', fontSize: 12 },
+                                                hr: { borderColor: 'rgba(255,255,255,0.1)', height: 1, marginVertical: 8 },
+                                            }}
+                                        >
+                                            {msg.text}
+                                        </Markdown>
+                                    ) : (
+                                        <Text style={[styles.bubbleText, styles.textUser]}>
+                                            {msg.text}
+                                        </Text>
+                                    )}
                                 </View>
                             </View>
                         );
@@ -263,23 +339,19 @@ export default function AiChatScreen({ navigation, route }: any) {
                     )}
                 </ScrollView>
 
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
-                    {QUICK_CHIPS.map((chip, index) => (
-                        <TouchableOpacity key={index} style={styles.chip} onPress={() => handleSend(chip)}>
-                            <Text style={styles.chipText}>{chip}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
 
                 <View style={styles.inputBar}>
                     <TextInput
                         style={styles.inputField}
-                        placeholder="Ask Tracet AI..."
+                        placeholder="Ask AI..."
                         placeholderTextColor="#71717A"
                         value={inputText}
                         onChangeText={setInputText}
                         multiline
                     />
+                    <TouchableOpacity onPress={() => setAiProvider(aiProvider === 'gemini' ? 'tracey' : 'gemini')} style={styles.providerBtn}>
+                        <Text style={styles.providerBtnText}>{aiProvider === 'gemini' ? 'Gemini' : 'Tracey'}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={() => handleSend()} style={styles.sendBtn}>
                         <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
                     </TouchableOpacity>
@@ -291,18 +363,6 @@ export default function AiChatScreen({ navigation, route }: any) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000000' },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        backgroundColor: '#0A0A0A',
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.05)'
-    },
-    headerTitleContainer: { flexDirection: 'row', alignItems: 'center' },
-    headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', letterSpacing: 0.5 },
     keyboardView: { flex: 1 },
     recommendationCard: {
         backgroundColor: '#0F0F10',
@@ -339,9 +399,6 @@ const styles = StyleSheet.create({
     bubbleText: { fontSize: 14, lineHeight: 20 },
     textAi: { color: '#FFFFFF' },
     textUser: { color: '#FFFFFF' },
-    chipsContainer: { paddingHorizontal: 16, maxHeight: 44, marginBottom: 10, marginTop: 10 },
-    chip: { backgroundColor: '#1C1C1E', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, marginRight: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', height: 36 },
-    chipText: { color: '#E4E4E7', fontSize: 12, fontWeight: '500' },
     inputBar: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -364,6 +421,22 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.06)'
     },
+    providerBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 16,
+        backgroundColor: '#1C1C1E',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
+        marginLeft: 10,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    providerBtnText: {
+        color: '#E4E4E7',
+        fontSize: 11,
+        fontWeight: '600'
+    },
     sendBtn: {
         width: 38,
         height: 38,
@@ -372,5 +445,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginLeft: 10
+    },
+    recommendationCardSpacing: {
+        marginBottom: 16
     }
 });

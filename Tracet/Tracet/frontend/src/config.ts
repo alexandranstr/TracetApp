@@ -8,4 +8,4 @@ try {
 export const API_BASE_URL =
   expoApiUrl ||
   (process.env.EXPO_PUBLIC_API_URL as string) ||
-  'http://localhost:5000';
+  'http://localhost:5001';

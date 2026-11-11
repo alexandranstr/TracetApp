@@ -32,6 +32,7 @@
     "react-native-country-picker-modal": "^3.0.0",
     "react-native-google-places-autocomplete": "^2.6.5",
     "react-native-maps": "1.27.2",
+    "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4"
