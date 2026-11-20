@@ -24,6 +24,7 @@ public class CreateLocationDto
     public string CountryName { get; set; } = string.Empty;
     public string? Address { get; set; }
     public string? PlaceName { get; set; }
+    public string? Category { get; set; }
     public EntityType EntityType { get; set; } = EntityType.POI;
     public string? GooglePlaceId { get; set; }
 }
@@ -54,6 +55,7 @@ public class LocationResponseDto
     public string CountryName { get; set; } = string.Empty;
     public string? Address { get; set; }
     public string? PlaceName { get; set; }
+    public string? Category { get; set; }
     public int EntityType { get; set; }
     public string? GooglePlaceId { get; set; }
 }

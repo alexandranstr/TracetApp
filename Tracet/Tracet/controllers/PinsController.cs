@@ -207,8 +207,38 @@ public class PinsController : ControllerBase
                     Math.Abs(l.Longitude - dto.Location.Longitude) < 0.0001);
         }
 
-        if (location == null)
+        // Auto-populate Location.Category from the pin category if Location doesn't have one
+        string? locationCategory = dto.Location.Category ?? dto.Category;
+        if (!string.IsNullOrEmpty(locationCategory) && PredefinedCategories.Contains(locationCategory))
         {
+            if (location == null)
+            {
+                location = new Location
+                {
+                    Latitude = dto.Location.Latitude,
+                    Longitude = dto.Location.Longitude,
+                    CityName = dto.Location.CityName ?? string.Empty,
+                    CountryName = dto.Location.CountryName ?? string.Empty,
+                    Address = dto.Location.Address,
+                    PlaceName = dto.Location.PlaceName,
+                    Category = locationCategory,
+                    EntityType = dto.Location.EntityType,
+                    GooglePlaceId = dto.Location.GooglePlaceId
+                };
+
+                _context.Locations.Add(location);
+                await _context.SaveChangesAsync();
+            }
+            else if (string.IsNullOrEmpty(location.Category))
+            {
+                // Location exists but has no category yet — populate it from this pin
+                location.Category = locationCategory;
+                await _context.SaveChangesAsync();
+            }
+        }
+        else if (location == null)
+        {
+            // Fallback: create location without category
             location = new Location
             {
                 Latitude = dto.Location.Latitude,
@@ -309,6 +339,7 @@ public class PinsController : ControllerBase
                 CountryName = location.CountryName,
                 Address = location.Address,
                 PlaceName = location.PlaceName,
+                Category = location.Category,
                 EntityType = (int)location.EntityType,
                 GooglePlaceId = location.GooglePlaceId
             }

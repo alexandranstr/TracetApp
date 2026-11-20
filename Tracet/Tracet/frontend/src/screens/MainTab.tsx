@@ -40,7 +40,7 @@ interface SelectedPoint {
     countryName?: string;
     googlePlaceId?: string;
     entityType?: number;
-}
+ }
 
 export default function MainTab({ navigation, route }: any) {
     const [currentUserId, setCurrentUserId] = useState<string | null>(route?.params?.currentUserId || null);
@@ -387,6 +387,7 @@ export default function MainTab({ navigation, route }: any) {
         }
         return 0;
     };
+
 
     const selectPlace = async (placeId: string, mainText: string) => {
         Keyboard.dismiss();
