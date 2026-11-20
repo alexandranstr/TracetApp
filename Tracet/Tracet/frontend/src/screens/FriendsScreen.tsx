@@ -86,6 +86,14 @@ interface RequestUser {
     photoUrl?: string;
 }
 
+interface BlockedUser {
+    blockedUserId: string;
+    username: string;
+    displayName?: string;
+    photoUrl?: string;
+    blockedAt: string;
+}
+
 export default function FriendsScreen({ navigation, route }: any) {
     const currentUserId = route?.params?.currentUserId;
 
@@ -94,11 +102,12 @@ export default function FriendsScreen({ navigation, route }: any) {
     const [isSearching, setIsSearching] = useState(false);
     const [isSearchFocused, setIsSearchFocused] = useState(false);
 
-    const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'sent'>('friends');
+    const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'sent' | 'blocked'>('friends');
 
     const [friends, setFriends] = useState<RequestUser[]>([]);
     const [incomingRequests, setIncomingRequests] = useState<RequestUser[]>([]);
     const [outgoingRequests, setOutgoingRequests] = useState<RequestUser[]>([]);
+    const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
 
     const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
@@ -126,7 +135,10 @@ export default function FriendsScreen({ navigation, route }: any) {
             });
             if (res.ok) {
                 const data = await res.json();
-                setFriends(data.friends || []);
+                // Filter out blocked users from friends list
+                const blockedUserIds = new Set(blockedUsers.map((u) => u.blockedUserId));
+                const filteredFriends = (data.friends || []).filter((f: any) => !blockedUserIds.has(f.id));
+                setFriends(filteredFriends);
                 setIncomingRequests(data.incomingRequests || []);
                 setOutgoingRequests(data.outgoingRequests || []);
             }
@@ -135,8 +147,26 @@ export default function FriendsScreen({ navigation, route }: any) {
         }
     };
 
+    const fetchBlockedUsers = async () => {
+        try {
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/blocked`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setBlockedUsers(data.blockedUsers || []);
+            }
+        } catch (err) {
+            console.log('Error fetching blocked users:', err);
+        }
+    };
+
     useEffect(() => {
         fetchSocialData();
+        fetchBlockedUsers();
     }, []);
 
     const handleSearch = (text: string) => {
@@ -215,6 +245,73 @@ export default function FriendsScreen({ navigation, route }: any) {
         }
     };
 
+    const handleBlock = async (targetUserId: string) => {
+        try {
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/block`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId }),
+            });
+            if (res.ok) {
+                // Remove from friends and add to blocked
+                const blockedFriend = friends.find((f) => f.id === targetUserId);
+                setFriends((prev) => prev.filter((f) => f.id !== targetUserId));
+                if (blockedFriend) {
+                    setBlockedUsers((prev) => [
+                        ...prev,
+                        {
+                            blockedUserId: blockedFriend.id,
+                            username: blockedFriend.username,
+                            displayName: blockedFriend.displayName,
+                            photoUrl: blockedFriend.photoUrl,
+                            blockedAt: new Date().toISOString()
+                        }
+                    ]);
+                }
+            }
+        } catch (err) {
+            console.log('Error blocking user:', err);
+        }
+    };
+
+    const handleUnblock = async (targetUserId: string) => {
+        try {
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/unblock`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId }),
+            });
+
+            if (res.ok) {
+                const unblockedUser = blockedUsers.find((u) => u.blockedUserId === targetUserId);
+                setBlockedUsers((prev) => prev.filter((u) => u.blockedUserId !== targetUserId));
+                // Re-add to friends if they were friends before blocking
+                if (unblockedUser) {
+                    setFriends((prev) => [
+                        ...prev,
+                        {
+                            id: unblockedUser.blockedUserId,
+                            senderId: '',
+                            username: unblockedUser.username,
+                            displayName: unblockedUser.displayName,
+                            photoUrl: unblockedUser.photoUrl
+                        }
+                    ]);
+                }
+            }
+        } catch (err) {
+            console.log('Failed to unblock user:', err);
+        }
+    };
+
     const renderAvatar = (photoUrl?: string) => {
         const resolvedUri = getResolvedImageUri(photoUrl);
 
@@ -285,69 +382,94 @@ export default function FriendsScreen({ navigation, route }: any) {
             </View>
 
             {searchQuery.trim().length === 0 && (
-                <View style={styles.tabContainer}>
-                    <TouchableOpacity
-                        style={[styles.tabItem, activeTab === 'friends' && styles.tabItemActive]}
-                        onPress={() => setActiveTab('friends')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons
-                            name="people"
-                            size={15}
-                            color={activeTab === 'friends' ? PINK_ACCENT : '#71717A'}
-                            style={{ marginRight: 4 }}
-                        />
-                        <Text style={[styles.tabText, activeTab === 'friends' && styles.tabTextActive]}>
-                            Friends
-                        </Text>
-                        <View style={[styles.tabBadge, activeTab === 'friends' && styles.tabBadgeActive]}>
-                            <Text style={[styles.tabBadgeText, activeTab === 'friends' && styles.tabBadgeTextActive]}>
-                                {friends.length}
+                <View style={styles.tabsWrapper}>
+                    <View style={styles.tabRow}>
+                        <TouchableOpacity
+                            style={[styles.tabItem, activeTab === 'friends' && styles.tabItemActive]}
+                            onPress={() => setActiveTab('friends')}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons
+                                name="people"
+                                size={18}
+                                color={activeTab === 'friends' ? PINK_ACCENT : '#71717A'}
+                                style={{ marginRight: 6 }}
+                            />
+                            <Text style={[styles.tabText, activeTab === 'friends' && styles.tabTextActive]}>
+                                Friends
                             </Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.tabItem, activeTab === 'requests' && styles.tabItemActive]}
-                        onPress={() => setActiveTab('requests')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons
-                            name="mail"
-                            size={15}
-                            color={activeTab === 'requests' ? PINK_ACCENT : '#71717A'}
-                            style={{ marginRight: 4 }}
-                        />
-                        <Text style={[styles.tabText, activeTab === 'requests' && styles.tabTextActive]}>
-                            Requests
-                        </Text>
-                        {incomingRequests.length > 0 && (
-                            <View style={styles.badgeCount}>
-                                <Text style={styles.badgeText}>{incomingRequests.length}</Text>
+                            <View style={[styles.tabBadge, activeTab === 'friends' && styles.tabBadgeActive]}>
+                                <Text style={[styles.tabBadgeText, activeTab === 'friends' && styles.tabBadgeTextActive]}>
+                                    {friends.length}
+                                </Text>
                             </View>
-                        )}
-                    </TouchableOpacity>
+                        </TouchableOpacity>
 
-                    <TouchableOpacity
-                        style={[styles.tabItem, activeTab === 'sent' && styles.tabItemActive]}
-                        onPress={() => setActiveTab('sent')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons
-                            name="paper-plane"
-                            size={15}
-                            color={activeTab === 'sent' ? PINK_ACCENT : '#71717A'}
-                            style={{ marginRight: 4 }}
-                        />
-                        <Text style={[styles.tabText, activeTab === 'sent' && styles.tabTextActive]}>
-                            Sent
-                        </Text>
-                        <View style={[styles.tabBadge, activeTab === 'sent' && styles.tabBadgeActive]}>
-                            <Text style={[styles.tabBadgeText, activeTab === 'sent' && styles.tabBadgeTextActive]}>
-                                {outgoingRequests.length}
+                        <TouchableOpacity
+                            style={[styles.tabItem, activeTab === 'requests' && styles.tabItemActive]}
+                            onPress={() => setActiveTab('requests')}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons
+                                name="mail"
+                                size={18}
+                                color={activeTab === 'requests' ? PINK_ACCENT : '#71717A'}
+                                style={{ marginRight: 6 }}
+                            />
+                            <Text style={[styles.tabText, activeTab === 'requests' && styles.tabTextActive]}>
+                                Requests
                             </Text>
-                        </View>
-                    </TouchableOpacity>
+                            {incomingRequests.length > 0 && (
+                                <View style={styles.badgeCount}>
+                                    <Text style={styles.badgeText}>{incomingRequests.length}</Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.tabRow}>
+                        <TouchableOpacity
+                            style={[styles.tabItem, activeTab === 'sent' && styles.tabItemActive]}
+                            onPress={() => setActiveTab('sent')}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons
+                                name="paper-plane"
+                                size={18}
+                                color={activeTab === 'sent' ? PINK_ACCENT : '#71717A'}
+                                style={{ marginRight: 6 }}
+                            />
+                            <Text style={[styles.tabText, activeTab === 'sent' && styles.tabTextActive]}>
+                                Sent
+                            </Text>
+                            <View style={[styles.tabBadge, activeTab === 'sent' && styles.tabBadgeActive]}>
+                                <Text style={[styles.tabBadgeText, activeTab === 'sent' && styles.tabBadgeTextActive]}>
+                                    {outgoingRequests.length}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.tabItem, activeTab === 'blocked' && styles.tabItemActive]}
+                            onPress={() => setActiveTab('blocked')}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons
+                                name="ban"
+                                size={18}
+                                color={activeTab === 'blocked' ? PINK_ACCENT : '#71717A'}
+                                style={{ marginRight: 6 }}
+                            />
+                            <Text style={[styles.tabText, activeTab === 'blocked' && styles.tabTextActive]}>
+                                Blocked
+                            </Text>
+                            <View style={[styles.tabBadge, activeTab === 'blocked' && styles.tabBadgeActive]}>
+                                <Text style={[styles.tabBadgeText, activeTab === 'blocked' && styles.tabBadgeTextActive]}>
+                                    {blockedUsers.length}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             )}
 
@@ -446,6 +568,13 @@ export default function FriendsScreen({ navigation, route }: any) {
                                                     }}
                                                 >
                                                     <Ionicons name="chatbubble-ellipses" size={18} color={PINK_ACCENT} />
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={[styles.iconChatBtn, { marginLeft: 12 }]}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => handleBlock(friend.id)}
+                                                >
+                                                    <Ionicons name="ban-outline" size={18} color="#EF4444" />
                                                 </TouchableOpacity>
                                             </View>
                                         </View>
@@ -550,6 +679,47 @@ export default function FriendsScreen({ navigation, route }: any) {
                             )}
                         </View>
                     )}
+
+                    {activeTab === 'blocked' && (
+                        <View>
+                            {blockedUsers.length > 0 ? (
+                                blockedUsers.map((user, idx) => (
+                                    <AnimatedCard key={user.blockedUserId || idx.toString()} index={idx} delay={60}>
+                                        <View style={styles.glassCard}>
+                                            <View style={styles.userInfo}>
+                                                {renderAvatar(user.photoUrl)}
+                                                <View style={styles.userTextContainer}>
+                                                    <Text style={styles.displayNameText}>
+                                                        {user.displayName || user.username}
+                                                    </Text>
+                                                    <Text style={styles.usernameText}>@{user.username}</Text>
+                                                </View>
+                                            </View>
+
+                                            <TouchableOpacity
+                                                style={styles.unblockBtn}
+                                                onPress={() => handleUnblock(user.blockedUserId)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="checkmark-circle" size={14} color="#34C759" />
+                                                <Text style={styles.unblockBtnText}>Unblock</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </AnimatedCard>
+                                ))
+                            ) : (
+                                <AnimatedCard index={0} delay={0}>
+                                    <View style={styles.emptyStateContainer}>
+                                        <View style={styles.emptyIconContainer}>
+                                            <Ionicons name="ban-outline" size={40} color="#3F3F46" />
+                                        </View>
+                                        <Text style={styles.emptyTitle}>No blocked users</Text>
+                                        <Text style={styles.emptyText}>Users you block will show up here</Text>
+                                    </View>
+                                </AnimatedCard>
+                            )}
+                        </View>
+                    )}
                 </ScrollView>
             )}
 
@@ -583,8 +753,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 20,
-        paddingTop: 12,
-        paddingBottom: 16,
+        paddingTop: 16,
+        paddingBottom: 20,
     },
     backBtnIcon: {
         width: 40,
@@ -610,16 +780,16 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     searchBarContainer: {
-        height: 52,
+        height: 56,
         backgroundColor: 'rgba(255, 255, 255, 0.04)',
-        borderRadius: 26,
+        borderRadius: 28,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 18,
+        paddingHorizontal: 20,
         marginHorizontal: 20,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.08)',
-        marginBottom: 16,
+        marginBottom: 20,
     },
     searchBarFocused: {
         borderColor: PINK_ACCENT,
@@ -631,19 +801,24 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '500',
     },
-    tabContainer: {
-        flexDirection: 'row',
+    tabsWrapper: {
         marginHorizontal: 20,
-        marginBottom: 20,
+        marginBottom: 24,
+        gap: 8,
+    },
+    tabRow: {
+        flexDirection: 'row',
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
         borderRadius: 16,
-        padding: 4,
+        padding: 6,
+        gap: 6,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.06)',
     },
     tabItem: {
         flex: 1,
-        paddingVertical: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 10,
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 12,
@@ -656,7 +831,7 @@ const styles = StyleSheet.create({
     },
     tabText: {
         color: '#71717A',
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: '600',
     },
     tabTextActive: {
@@ -666,7 +841,7 @@ const styles = StyleSheet.create({
     tabBadge: {
         backgroundColor: 'rgba(255, 255, 255, 0.06)',
         borderRadius: 10,
-        paddingHorizontal: 6,
+        paddingHorizontal: 7,
         paddingVertical: 2,
         marginLeft: 6,
     },
@@ -675,7 +850,7 @@ const styles = StyleSheet.create({
     },
     tabBadgeText: {
         color: '#71717A',
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '700',
     },
     tabBadgeTextActive: {
@@ -684,7 +859,7 @@ const styles = StyleSheet.create({
     badgeCount: {
         backgroundColor: PINK_ACCENT,
         borderRadius: 10,
-        paddingHorizontal: 6,
+        paddingHorizontal: 7,
         paddingVertical: 2,
         marginLeft: 6,
     },
@@ -695,12 +870,12 @@ const styles = StyleSheet.create({
     },
     listContainer: {
         paddingHorizontal: 20,
-        paddingBottom: 40,
+        paddingBottom: 60,
     },
     sectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 16,
     },
     sectionTitle: {
         color: '#71717A',
@@ -713,9 +888,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        padding: 14,
-        borderRadius: 20,
-        marginBottom: 12,
+        padding: 18,
+        borderRadius: 22,
+        marginBottom: 16,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.09)',
     },
@@ -728,14 +903,14 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     avatarImage: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 54,
+        height: 54,
+        borderRadius: 27,
     },
     avatarPlaceholder: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 54,
+        height: 54,
+        borderRadius: 27,
         backgroundColor: 'rgba(255, 255, 255, 0.08)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -743,7 +918,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     userTextContainer: {
-        marginLeft: 14,
+        marginLeft: 16,
         flex: 1,
     },
     displayNameText: {
@@ -761,9 +936,9 @@ const styles = StyleSheet.create({
         backgroundColor: PINK_ACCENT,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
+        paddingVertical: 10,
+        paddingHorizontal: 18,
+        borderRadius: 22,
         gap: 6,
     },
     addBtnText: {
@@ -775,9 +950,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: 'rgba(255, 255, 255, 0.06)',
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 16,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 18,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.09)',
     },
@@ -789,11 +964,11 @@ const styles = StyleSheet.create({
     friendsBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: 6,
         backgroundColor: 'rgba(52, 199, 89, 0.12)',
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 16,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 18,
     },
     friendsText: {
         color: '#34C759',
@@ -805,9 +980,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     iconChatBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
         backgroundColor: 'rgba(255, 255, 255, 0.06)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -816,12 +991,12 @@ const styles = StyleSheet.create({
     },
     actionRow: {
         flexDirection: 'row',
-        gap: 8,
+        gap: 12,
     },
     actionBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -833,19 +1008,35 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.12)',
     },
+    unblockBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(52, 199, 89, 0.12)',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 22,
+        gap: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(52, 199, 89, 0.3)',
+    },
+    unblockBtnText: {
+        color: '#34C759',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     emptyStateContainer: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 60,
+        paddingVertical: 80,
     },
     emptyIconContainer: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 90,
+        height: 90,
+        borderRadius: 45,
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 20,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.06)',
     },

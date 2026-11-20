@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -13,6 +13,7 @@ import {
     Alert,
     SafeAreaView,
     Switch,
+    FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -76,6 +77,36 @@ interface Pagination {
 interface JournalTabProps {
     currentUserId?: string | null;
     onPinUpdated?: () => void;
+}
+
+// LazyImage component: defers loading until visible, shows placeholder first
+function LazyImage({ uri, style }: { uri: string; style: any }) {
+    const [loaded, setLoaded] = useState(false);
+    const [inView, setInView] = useState(false);
+    const ref = useRef<View>(null);
+
+    useEffect(() => {
+        if (!inView && !loaded) {
+            const timer = setTimeout(() => setInView(true), 100);
+            return () => clearTimeout(timer);
+        }
+    }, [inView, loaded]);
+
+    return (
+        <View ref={ref} style={[style, { backgroundColor: '#2C2C2E' }]}>
+            {!loaded && (
+                <ActivityIndicator size="small" color="#8E8E93" style={{ position: 'absolute' }} />
+            )}
+            {inView && (
+                <Image
+                    source={{ uri }}
+                    style={style}
+                    resizeMode="cover"
+                    onLoad={() => setLoaded(true)}
+                />
+            )}
+        </View>
+    );
 }
 
 export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabProps) {
@@ -519,19 +550,18 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
                                 const photos = getPhotoUrls(pin.photoUrlsJson);
                                 return (
                                     <View key={pin.id} style={styles.myPinCard}>
-                                        {/* Photos */}
+                                        {/* Photos with lazy loading */}
                                         {photos.length > 0 && (
                                             <View style={styles.pinPhotosContainer}>
                                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pinPhotosScroll}>
                                                     {photos.map((photoUrl, idx) => (
-                                                        <Image
+                                                        <LazyImage
                                                             key={idx}
-                                                            source={{ uri: photoUrl }}
+                                                            uri={photoUrl}
                                                             style={[
                                                                 styles.pinPhoto,
                                                                 photos.length === 1 && styles.pinPhotoSingle,
                                                             ]}
-                                                            resizeMode="cover"
                                                         />
                                                     ))}
                                                 </ScrollView>

@@ -14,6 +14,8 @@ import ChatScreen from "./src/screens/ChatScreen";
 import ConversationsScreen from "./src/screens/ConversationsScreen";
 import { API_BASE_URL } from './src/config';
 import AiChatScreen from "./src/screens/AiChatScreen";
+import PrivacyPolicyScreen from "./src/screens/PrivacyPolicyScreen";
+import SharedHistoryScreen from "./src/screens/SharedHistoryScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -105,6 +107,8 @@ export default function App() {
                 <Stack.Screen name="Messages" component={ConversationsScreen} />
                 <Stack.Screen name="ChatScreen" component={ChatScreen} />
                 <Stack.Screen name="AiChatScreen" component={AiChatScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="SharedHistory" component={SharedHistoryScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
     );

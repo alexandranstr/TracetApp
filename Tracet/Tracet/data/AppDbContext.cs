@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<AIChatHistory> AIChatHistories => Set<AIChatHistory>();
+    public DbSet<BlockedUser> BlockedUsers => Set<BlockedUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -23,7 +24,48 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<LocationTag>()
             .HasKey(lt => new { lt.LocationId, lt.TagId });
+
+        // Performance indexes for scalability
+        // Pins: composite indexes for history queries and geographic bounding box
+        modelBuilder.Entity<Pin>()
+            .HasIndex(p => new { p.UserId, p.CreatedAt })
+            .IsDescending();
         
+        modelBuilder.Entity<Pin>()
+            .HasIndex(p => new { p.UserId, p.VisitedAt })
+            .IsDescending();
+
+        modelBuilder.Entity<Pin>()
+            .HasIndex(p => p.LocationId);
+
+        // Location: spatial index for bounding box queries
+        modelBuilder.Entity<Location>()
+            .HasIndex(l => new { l.Latitude, l.Longitude });
+
+        // Conversations: fast lookup by participant
+        modelBuilder.Entity<Conversation>()
+            .HasIndex(c => c.User1Id);
+        
+        modelBuilder.Entity<Conversation>()
+            .HasIndex(c => c.User2Id);
+
+        // Messages: pagination by conversation
+        modelBuilder.Entity<Message>()
+            .HasIndex(m => new { m.ConversationId, m.SentAt })
+            .IsDescending();
+
+        // Friendships: filter by status
+        modelBuilder.Entity<Friendship>()
+            .HasIndex(f => new { f.UserId, f.Status });
+        
+        modelBuilder.Entity<Friendship>()
+            .HasIndex(f => new { f.FriendId, f.Status });
+
+        // AIChatHistories: filter by provider and sort by timestamp
+        modelBuilder.Entity<AIChatHistory>()
+            .HasIndex(h => new { h.UserId, h.Provider, h.Timestamp })
+            .IsDescending();
+
         modelBuilder.Entity<Friendship>()
             .HasOne(f => f.User)
             .WithMany()
@@ -34,6 +76,18 @@ public class AppDbContext : DbContext
             .HasOne(f => f.Friend)
             .WithMany()
             .HasForeignKey(f => f.FriendId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BlockedUser>()
+            .HasOne(b => b.Blocker)
+            .WithMany()
+            .HasForeignKey(b => b.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BlockedUser>()
+            .HasOne(b => b.Blocked)
+            .WithMany()
+            .HasForeignKey(b => b.BlockedUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Tag>().HasData(

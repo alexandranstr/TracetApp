@@ -1,4 +1,4 @@
-﻿using FirebaseAdmin;
+using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Tracet.data;
 using Tracet.hubs;
+using Tracet.middleware;
 
 Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
 var builder = WebApplication.CreateBuilder(args);
@@ -92,6 +93,14 @@ builder.Services.AddRateLimiter(options =>
         l.QueueLimit = 0;
     });
 
+    // AI chat rate limiter — more strict (costs money per request)
+    options.AddFixedWindowLimiter("ai", l =>
+    {
+        l.PermitLimit = 10;
+        l.Window = TimeSpan.FromMinutes(1);
+        l.QueueLimit = 0;
+    });
+
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
     options.OnRejected = (context, token) =>
@@ -103,6 +112,8 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
+builder.Services.AddMemoryCache();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -111,6 +122,8 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.Migrate();
 }
+
+app.UseGlobalExceptionMiddleware();
 
 app.Use((context, next) =>
 {

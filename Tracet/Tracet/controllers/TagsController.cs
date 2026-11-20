@@ -31,7 +31,7 @@ namespace Tracet.controllers
 
             try
             {
-                FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+                FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
                 return (decodedToken.Uid, null);
             }
             catch (FirebaseAuthException ex)

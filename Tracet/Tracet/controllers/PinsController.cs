@@ -2,6 +2,7 @@ using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
 using Tracet.data;
 using Tracet.DTOs;
@@ -15,6 +16,7 @@ namespace Tracet.Controllers;
 public class PinsController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly IMemoryCache _cache;
 
     private static readonly string[] PredefinedCategories = new[]
     {
@@ -35,9 +37,10 @@ public class PinsController : ControllerBase
         "Landmark"
     };
 
-    public PinsController(AppDbContext context)
+    public PinsController(AppDbContext context, IMemoryCache cache)
     {
         _context = context;
+        _cache = cache;
     }
 
     private async Task<(string? Uid, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
@@ -52,7 +55,7 @@ public class PinsController : ControllerBase
 
         try
         {
-            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
             return (decodedToken.Uid, null);
         }
         catch (FirebaseAuthException ex)
@@ -72,8 +75,12 @@ public class PinsController : ControllerBase
         return Ok(PredefinedCategories);
     }
 
-    [HttpGet]
-    public async Task<IActionResult> GetPins()
+    [HttpGet("nearby")]
+    public async Task<IActionResult> GetNearbyPins(
+        [FromQuery] double swLat,
+        [FromQuery] double swLng,
+        [FromQuery] double neLat,
+        [FromQuery] double neLng)
     {
         var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
@@ -83,15 +90,101 @@ public class PinsController : ControllerBase
             .Select(f => f.UserId == currentUserId ? f.FriendId : f.UserId)
             .ToListAsync();
 
-        var visiblePins = await _context.Pins
+        // Get blocked user IDs (both directions: users I blocked + users who blocked me)
+        var blockedUserIds = await _context.BlockedUsers
+            .Where(b => b.UserId == currentUserId || b.BlockedUserId == currentUserId)
+            .Select(b => b.UserId == currentUserId ? b.BlockedUserId! : b.UserId!)
+            .ToListAsync();
+
+        var nearbyPins = await _context.Pins
             .Include(p => p.Location)
             .Include(p => p.User)
             .Where(p =>
-                p.UserId == currentUserId
-                ||
-                (acceptedFriendUserIds.Contains(p.UserId) && !p.IsPrivate)
+                p.Location != null &&
+                p.Location.Latitude >= swLat &&
+                p.Location.Latitude <= neLat &&
+                p.Location.Longitude >= swLng &&
+                p.Location.Longitude <= neLng &&
+                !blockedUserIds.Contains(p.UserId) &&
+                (
+                    p.UserId == currentUserId
+                    ||
+                    (acceptedFriendUserIds.Contains(p.UserId) && !p.IsPrivate)
+                )
             )
             .OrderByDescending(p => p.VisitedAt)
+            .Select(p => new
+            {
+                p.Id,
+                p.Title,
+                p.JournalEntry,
+                p.Category,
+                p.Rating,
+                p.IsPrivate,
+                p.VisitedAt,
+                p.CreatedAt,
+                p.UserId,
+                UserName = p.User != null ? p.User.Username : "Anonymous",
+                p.LocationId,
+                Location = new
+                {
+                    p.Location.Id,
+                    p.Location.Latitude,
+                    p.Location.Longitude,
+                    p.Location.CityName,
+                    p.Location.CountryName,
+                    p.Location.Address,
+                    p.Location.PlaceName,
+                    EntityType = (int)p.Location.EntityType,
+                    p.Location.GooglePlaceId
+                },
+                p.PhotoUrlsJson,
+                p.TagsVectorJson
+            })
+            .ToListAsync();
+
+        return Ok(nearbyPins);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetPins([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        page = Math.Max(1, page);
+        pageSize = Math.Max(1, Math.Min(50, pageSize));
+
+        var acceptedFriendUserIds = await _context.Friendships
+            .Where(f => (f.UserId == currentUserId || f.FriendId == currentUserId) && f.Status == "Accepted")
+            .Select(f => f.UserId == currentUserId ? f.FriendId : f.UserId)
+            .ToListAsync();
+
+        // Get blocked user IDs (both directions: users I blocked + users who blocked me)
+        var blockedUserIds = await _context.BlockedUsers
+            .Where(b => b.UserId == currentUserId || b.BlockedUserId == currentUserId)
+            .Select(b => b.UserId == currentUserId ? b.BlockedUserId! : b.UserId!)
+            .ToListAsync();
+
+        var query = _context.Pins
+            .Include(p => p.Location)
+            .Include(p => p.User)
+            .Where(p =>
+                !blockedUserIds.Contains(p.UserId) &&
+                (
+                    p.UserId == currentUserId
+                    ||
+                    (acceptedFriendUserIds.Contains(p.UserId) && !p.IsPrivate)
+                )
+            )
+            .OrderByDescending(p => p.VisitedAt);
+
+        var totalPins = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling((double)totalPins / pageSize);
+
+        var visiblePins = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(p => new
             {
                 p.Id,
@@ -111,7 +204,19 @@ public class PinsController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(visiblePins);
+        return Ok(new
+        {
+            pins = visiblePins,
+            pagination = new
+            {
+                currentPage = page,
+                pageSize,
+                totalPins,
+                totalPages,
+                hasPreviousPage = page > 1,
+                hasNextPage = page < totalPages
+            }
+        });
     }
 
     [HttpDelete("{id}")]
@@ -130,6 +235,10 @@ public class PinsController : ControllerBase
 
         _context.Pins.Remove(pin);
         await _context.SaveChangesAsync();
+
+        // Invalidate statistics cache after deleting a pin
+        _cache.Remove($"statistics_{userId}");
+
         return NoContent();
     }
 
@@ -182,6 +291,34 @@ public class PinsController : ControllerBase
         if (dto == null || dto.Location == null)
         {
             return BadRequest("Invalid pin or location data.");
+        }
+
+        // Validate coordinates
+        if (dto.Location.Latitude < -90 || dto.Location.Latitude > 90)
+        {
+            return BadRequest(new { message = "Invalid latitude. Must be between -90 and 90." });
+        }
+        if (dto.Location.Longitude < -180 || dto.Location.Longitude > 180)
+        {
+            return BadRequest(new { message = "Invalid longitude. Must be between -180 and 180." });
+        }
+
+        // Validate title length
+        if (!string.IsNullOrEmpty(dto.Title) && dto.Title.Length > 200)
+        {
+            return BadRequest(new { message = "Title is too long. Maximum 200 characters." });
+        }
+
+        // Validate journal entry length
+        if (!string.IsNullOrEmpty(dto.JournalEntry) && dto.JournalEntry.Length > 5000)
+        {
+            return BadRequest(new { message = "Journal entry is too long. Maximum 5000 characters." });
+        }
+
+        // Validate rating range
+        if (dto.Rating.HasValue && (dto.Rating.Value < 1 || dto.Rating.Value > 5))
+        {
+            return BadRequest(new { message = "Rating must be between 1 and 5." });
         }
 
         if (!string.IsNullOrEmpty(dto.Category) && !PredefinedCategories.Contains(dto.Category))
@@ -317,6 +454,9 @@ public class PinsController : ControllerBase
         _context.Pins.Add(pin);
         await _context.SaveChangesAsync();
 
+        // Invalidate statistics cache after creating a pin
+        _cache.Remove($"statistics_{userId}");
+
         var responseDto = new PinResponseDto
         {
             Id = pin.Id,
@@ -354,14 +494,21 @@ public class PinsController : ControllerBase
         var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
 
+        var cacheKey = $"statistics_{currentUserId}";
+        if (_cache.TryGetValue(cacheKey, out object? cachedStats))
+        {
+            return Ok(cachedStats);
+        }
+
         var userPins = await _context.Pins
             .Include(p => p.Location)
             .Where(p => p.UserId == currentUserId)
             .ToListAsync();
 
+        object result;
         if (!userPins.Any())
         {
-            return Ok(new
+            result = new
             {
                 totalPins = 0,
                 averageRating = 0.0,
@@ -372,128 +519,155 @@ public class PinsController : ControllerBase
                 topCategories = new List<object>(),
                 topTags = new List<object>(),
                 pinsByMonth = new List<object>()
-            });
+            };
         }
-
-        var totalPins = userPins.Count;
-
-        var ratedPins = userPins.Where(p => p.Rating.HasValue).ToList();
-        var averageRating = ratedPins.Any() ? ratedPins.Average(p => p.Rating!.Value) : 0.0;
-
-        var countries = userPins
-            .Where(p => !string.IsNullOrEmpty(p.Location?.CountryName))
-            .GroupBy(p => p.Location!.CountryName!)
-            .Select(g => new { Country = g.Key, Count = g.Count() })
-            .OrderByDescending(x => x.Count)
-            .Take(5)
-            .ToList();
-
-        var countriesVisited = countries.Count;
-
-        var cities = userPins
-            .Where(p => !string.IsNullOrEmpty(p.Location?.CityName))
-            .GroupBy(p => p.Location!.CityName!)
-            .Select(g => new { City = g.Key, Count = g.Count() })
-            .OrderByDescending(x => x.Count)
-            .Take(5)
-            .ToList();
-
-        var citiesVisited = cities.Count;
-
-        var categories = userPins
-            .GroupBy(p => p.Category)
-            .Select(g => new { Category = g.Key, Count = g.Count() })
-            .OrderByDescending(x => x.Count)
-            .Take(5)
-            .ToList();
-
-        var allTagIds = new List<int>();
-        foreach (var pin in userPins)
+        else
         {
-            if (!string.IsNullOrEmpty(pin.TagsVectorJson))
+            var totalPins = userPins.Count;
+
+            var ratedPins = userPins.Where(p => p.Rating.HasValue).ToList();
+            var averageRating = ratedPins.Any() ? ratedPins.Average(p => p.Rating!.Value) : 0.0;
+
+            var countries = userPins
+                .Where(p => !string.IsNullOrEmpty(p.Location?.CountryName))
+                .GroupBy(p => p.Location!.CountryName!)
+                .Select(g => new { Country = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .Take(5)
+                .ToList();
+
+            var countriesVisited = countries.Count;
+
+            var cities = userPins
+                .Where(p => !string.IsNullOrEmpty(p.Location?.CityName))
+                .GroupBy(p => p.Location!.CityName!)
+                .Select(g => new { City = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .Take(5)
+                .ToList();
+
+            var citiesVisited = cities.Count;
+
+            var categories = userPins
+                .GroupBy(p => p.Category)
+                .Select(g => new { Category = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .Take(5)
+                .ToList();
+
+            var allTagIds = new List<int>();
+            foreach (var pin in userPins)
             {
-                try
+                if (!string.IsNullOrEmpty(pin.TagsVectorJson))
                 {
-                    var tagIds = JsonSerializer.Deserialize<List<int>>(pin.TagsVectorJson);
-                    if (tagIds != null)
+                    try
                     {
-                        allTagIds.AddRange(tagIds);
+                        var tagIds = JsonSerializer.Deserialize<List<int>>(pin.TagsVectorJson);
+                        if (tagIds != null)
+                        {
+                            allTagIds.AddRange(tagIds);
+                        }
                     }
+                    catch { }
                 }
-                catch { }
             }
-        }
 
-        var topTagsList = new List<object>();
-        if (allTagIds.Any())
-        {
-            var tagCounts = allTagIds.GroupBy(t => t).Select(g => new { TagId = g.Key, Count = g.Count() }).OrderByDescending(x => x.Count).Take(5).ToList();
-
-            var tags = await _context.Tags.Where(t => tagCounts.Select(tc => tc.TagId).Contains(t.Id)).ToListAsync();
-
-            foreach (var tc in tagCounts)
+            var topTagsList = new List<object>();
+            if (allTagIds.Any())
             {
-                var tag = tags.FirstOrDefault(t => t.Id == tc.TagId);
-                topTagsList.Add(new
+                var tagCounts = allTagIds.GroupBy(t => t).Select(g => new { TagId = g.Key, Count = g.Count() }).OrderByDescending(x => x.Count).Take(5).ToList();
+
+                var tags = await _context.Tags.Where(t => tagCounts.Select(tc => tc.TagId).Contains(t.Id)).ToListAsync();
+
+                foreach (var tc in tagCounts)
                 {
-                    TagName = tag?.Name ?? $"Tag {tc.TagId}",
-                    Count = tc.Count
+                    var tag = tags.FirstOrDefault(t => t.Id == tc.TagId);
+                    topTagsList.Add(new
+                    {
+                        TagName = tag?.Name ?? $"Tag {tc.TagId}",
+                        Count = tc.Count
+                    });
+                }
+            }
+
+            var now = DateTime.UtcNow;
+            var pinsByMonth = new List<object>();
+            for (int i = 11; i >= 0; i--)
+            {
+                var targetDate = now.AddMonths(-i);
+                var year = targetDate.Year;
+                var month = targetDate.Month;
+
+                var count = userPins.Count(p => p.CreatedAt.Year == year && p.CreatedAt.Month == month);
+
+                pinsByMonth.Add(new
+                {
+                    Month = month,
+                    Year = year,
+                    Count = count
                 });
             }
-        }
 
-        var now = DateTime.UtcNow;
-        var pinsByMonth = new List<object>();
-        for (int i = 11; i >= 0; i--)
-        {
-            var targetDate = now.AddMonths(-i);
-            var year = targetDate.Year;
-            var month = targetDate.Month;
-
-            var count = userPins.Count(p => p.CreatedAt.Year == year && p.CreatedAt.Month == month);
-
-            pinsByMonth.Add(new
+            result = new
             {
-                Month = month,
-                Year = year,
-                Count = count
-            });
+                totalPins,
+                averageRating = Math.Round(averageRating, 1),
+                countriesVisited,
+                citiesVisited,
+                topCountries = countries,
+                topCities = cities,
+                topCategories = categories,
+                topTags = topTagsList,
+                pinsByMonth
+            };
         }
 
-        return Ok(new
-        {
-            totalPins,
-            averageRating = Math.Round(averageRating, 1),
-            countriesVisited,
-            citiesVisited,
-            topCountries = countries,
-            topCities = cities,
-            topCategories = categories,
-            topTags = topTagsList,
-            pinsByMonth
-        });
+        // Cache for 5 minutes with sliding expiration
+        var cacheOptions = new MemoryCacheEntryOptions()
+            .SetSlidingExpiration(TimeSpan.FromMinutes(5))
+            .SetAbsoluteExpiration(TimeSpan.FromMinutes(30));
+        _cache.Set(cacheKey, result, cacheOptions);
+
+        return Ok(result);
     }
 
     [HttpGet("shared-history")]
-    public async Task<IActionResult> GetSharedHistory()
+    public async Task<IActionResult> GetSharedHistory([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
+
+        page = Math.Max(1, page);
+        pageSize = Math.Max(1, Math.Min(50, pageSize));
 
         var acceptedFriendUserIds = await _context.Friendships
             .Where(f => (f.UserId == currentUserId || f.FriendId == currentUserId) && f.Status == "Accepted")
             .Select(f => f.UserId == currentUserId ? f.FriendId : f.UserId)
             .ToListAsync();
 
-        var sharedPins = await _context.Pins
+        // Get blocked user IDs (both directions: users I blocked + users who blocked me)
+        var blockedUserIds = await _context.BlockedUsers
+            .Where(b => b.UserId == currentUserId || b.BlockedUserId == currentUserId)
+            .Select(b => b.UserId == currentUserId ? b.BlockedUserId! : b.UserId!)
+            .ToListAsync();
+
+        var query = _context.Pins
             .Include(p => p.Location)
             .Include(p => p.User)
             .Where(p =>
                 acceptedFriendUserIds.Contains(p.UserId) &&
+                !blockedUserIds.Contains(p.UserId) &&
                 p.UserId != currentUserId &&
                 !p.IsPrivate
             )
-            .OrderByDescending(p => p.CreatedAt)
+            .OrderByDescending(p => p.CreatedAt);
+
+        var totalPins = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling((double)totalPins / pageSize);
+
+        var sharedPins = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(p => new
             {
                 p.Id,
@@ -525,7 +699,19 @@ public class PinsController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(sharedPins);
+        return Ok(new
+        {
+            pins = sharedPins,
+            pagination = new
+            {
+                currentPage = page,
+                pageSize,
+                totalPins,
+                totalPages,
+                hasPreviousPage = page > 1,
+                hasNextPage = page < totalPages
+            }
+        });
     }
 
     [HttpGet("my-pins")]

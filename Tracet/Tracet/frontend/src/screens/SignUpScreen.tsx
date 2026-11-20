@@ -26,6 +26,7 @@ export default function SignUpScreen({ navigation }: any) {
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
 
     useEffect(() => {
         GoogleSignin.configure({
@@ -34,6 +35,11 @@ export default function SignUpScreen({ navigation }: any) {
     }, []);
 
     const handleSignUp = async () => {
+        if (!agreedToTerms) {
+            Alert.alert('Terms Required', 'Please agree to the Terms & Privacy Policy to continue.');
+            return;
+        }
+
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
 
@@ -79,6 +85,11 @@ export default function SignUpScreen({ navigation }: any) {
     };
 
     const handleGoogleSignIn = async () => {
+        if (!agreedToTerms) {
+            Alert.alert('Terms Required', 'Please agree to the Terms & Privacy Policy to continue.');
+            return;
+        }
+
         try {
             await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
             const signInResult = await GoogleSignin.signIn();
@@ -221,6 +232,28 @@ export default function SignUpScreen({ navigation }: any) {
                                     </TouchableOpacity>
                                 </View>
                             </View>
+
+                            <TouchableOpacity
+                                activeOpacity={0.7}
+                                onPress={() => setAgreedToTerms(!agreedToTerms)}
+                                style={styles.checkboxRow}
+                            >
+                                <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
+                                    {agreedToTerms && (
+                                        <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                            <Path d="M20 6L9 17l-5-5" />
+                                        </Svg>
+                                    )}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.termsText}>
+                                        I agree to the{' '}
+                                        <Text style={styles.termsLink} onPress={() => navigation?.navigate('PrivacyPolicy')}>
+                                            Terms & Privacy Policy
+                                        </Text>
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
 
                             <TouchableOpacity
                                 style={styles.primaryButton}
@@ -412,6 +445,39 @@ const styles = StyleSheet.create({
         fontWeight: '400',
     },
     signInLink: {
+        color: '#FF4B82',
+        fontWeight: '600',
+        textDecorationLine: 'underline',
+    },
+    checkboxRow: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginTop: 4,
+        marginBottom: 8,
+        gap: 10,
+    },
+    checkbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: 'rgba(239, 234, 225, 0.3)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 2,
+    },
+    checkboxChecked: {
+        backgroundColor: '#FF4B82',
+        borderColor: '#FF4B82',
+    },
+    termsText: {
+        color: '#94A3B8',
+        fontSize: 13,
+        lineHeight: 18,
+        flex: 1,
+    },
+    termsLink: {
         color: '#FF4B82',
         fontWeight: '600',
         textDecorationLine: 'underline',

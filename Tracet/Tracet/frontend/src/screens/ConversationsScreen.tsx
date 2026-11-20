@@ -44,6 +44,8 @@ interface ConversationItem {
     lastMessageAt: string;
     lastMessageRead?: boolean;
     unreadCount?: number;
+    youBlockedPartner?: boolean;
+    partnerBlockedYou?: boolean;
 }
 
 export default function ConversationsScreen({ navigation, route }: any) {
@@ -77,7 +79,7 @@ export default function ConversationsScreen({ navigation, route }: any) {
             });
             if (res.ok) {
                 const data = await res.json();
-                setConversations(data);
+                setConversations(data.conversations || []);
             }
         } catch (err) {
             console.log('Error fetching conversations:', err);
@@ -197,7 +199,9 @@ export default function ConversationsScreen({ navigation, route }: any) {
                                     partnerId: item.partnerId,
                                     partnerName: item.displayName,
                                     partnerPhoto: item.photoUrl,
-                                    currentUserId
+                                    currentUserId,
+                                    youBlockedPartner: item.youBlockedPartner,
+                                    partnerBlockedYou: item.partnerBlockedYou
                                 })}
                             >
                                 <View style={styles.avatarWrapper}>
@@ -214,6 +218,17 @@ export default function ConversationsScreen({ navigation, route }: any) {
                                             {formatTimestamp(item.lastMessageAt)}
                                         </Text>
                                     </View>
+
+                                    {item.youBlockedPartner && (
+                                        <Text style={styles.blockedText}>
+                                            You blocked this person
+                                        </Text>
+                                    )}
+                                    {item.partnerBlockedYou && (
+                                        <Text style={styles.blockedByText}>
+                                            This person blocked you
+                                        </Text>
+                                    )}
 
                                     <View style={styles.bottomRow}>
                                         <Text
@@ -412,6 +427,18 @@ const styles = StyleSheet.create({
         color: '#71717A',
         fontWeight: '400',
         fontStyle: 'italic'
+    },
+    blockedText: {
+        color: '#EF4444',
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 4
+    },
+    blockedByText: {
+        color: '#F59E0B',
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 4
     },
     statusContainer: {
         flexDirection: 'row',

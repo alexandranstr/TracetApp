@@ -43,9 +43,36 @@ namespace Tracet.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "Provider", "Timestamp")
+                        .IsDescending();
 
                     b.ToTable("AIChatHistories");
+                });
+
+            modelBuilder.Entity("Tracet.models.BlockedUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("BlockedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BlockedUserId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedUserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("BlockedUsers");
                 });
 
             modelBuilder.Entity("Tracet.models.Conversation", b =>
@@ -77,6 +104,10 @@ namespace Tracet.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("User1Id");
+
+                    b.HasIndex("User2Id");
+
                     b.ToTable("Conversations");
                 });
 
@@ -103,9 +134,9 @@ namespace Tracet.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FriendId");
+                    b.HasIndex("FriendId", "Status");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "Status");
 
                     b.ToTable("Friendships");
                 });
@@ -146,6 +177,8 @@ namespace Tracet.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Latitude", "Longitude");
 
                     b.ToTable("Locations");
 
@@ -540,9 +573,10 @@ namespace Tracet.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConversationId");
-
                     b.HasIndex("SenderId");
+
+                    b.HasIndex("ConversationId", "SentAt")
+                        .IsDescending();
 
                     b.ToTable("Messages");
                 });
@@ -596,7 +630,11 @@ namespace Tracet.Migrations
 
                     b.HasIndex("LocationId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "CreatedAt")
+                        .IsDescending();
+
+                    b.HasIndex("UserId", "VisitedAt")
+                        .IsDescending();
 
                     b.ToTable("Pins");
                 });
@@ -730,6 +768,25 @@ namespace Tracet.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tracet.models.BlockedUser", b =>
+                {
+                    b.HasOne("Tracet.models.User", "Blocked")
+                        .WithMany()
+                        .HasForeignKey("BlockedUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Tracet.models.User", "Blocker")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Blocked");
+
+                    b.Navigation("Blocker");
                 });
 
             modelBuilder.Entity("Tracet.models.Friendship", b =>

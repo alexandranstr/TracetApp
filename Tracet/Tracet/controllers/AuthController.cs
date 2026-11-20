@@ -1,5 +1,6 @@
 using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -15,10 +16,12 @@ namespace Tracet.controllers;
 public class AuthController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
+    private readonly IWebHostEnvironment _environment;
 
-    public AuthController(AppDbContext dbContext)
+    public AuthController(AppDbContext dbContext, IWebHostEnvironment environment)
     {
         _dbContext = dbContext;
+        _environment = environment;
     }
     
     private async Task<(string? Uid, FirebaseToken? DecodedToken, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
@@ -33,7 +36,7 @@ public class AuthController : ControllerBase
 
         try
         {
-            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
             return (decodedToken.Uid, decodedToken, null);
         }
         catch (FirebaseAuthException ex)
@@ -193,21 +196,104 @@ public class AuthController : ControllerBase
         try
         {
             var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == uid);
-            if (user != null)
+            if (user == null)
             {
-                _dbContext.Users.Remove(user);
-                await _dbContext.SaveChangesAsync();
+                return NotFound(new { message = "User not found." });
             }
+
+            // Delete all AI chat history entries for this user
+            var aiChatHistories = await _dbContext.AIChatHistories.Where(h => h.UserId == uid).ToListAsync();
+            _dbContext.AIChatHistories.RemoveRange(aiChatHistories);
+
+            // Delete all pins for this user
+            var pins = await _dbContext.Pins.Where(p => p.UserId == uid).ToListAsync();
+            
+            // Delete pin photo files from disk
+            foreach (var pin in pins)
+            {
+                if (!string.IsNullOrEmpty(pin.PhotoUrlsJson))
+                {
+                    try
+                    {
+                        var photoUrls = System.Text.Json.JsonSerializer.Deserialize<string[]>(pin.PhotoUrlsJson);
+                        if (photoUrls != null)
+                        {
+                            foreach (var photoUrl in photoUrls)
+                            {
+                                if (!string.IsNullOrEmpty(photoUrl) && photoUrl.StartsWith("/uploads/"))
+                                {
+                                    var fileName = System.IO.Path.GetFileName(photoUrl);
+                                    var directoryPath = System.IO.Path.Combine(_environment.ContentRootPath, "uploads", photoUrl.Replace("/uploads/", "").Replace('/', System.IO.Path.DirectorySeparatorChar));
+                                    if (System.IO.File.Exists(directoryPath))
+                                    {
+                                        System.IO.File.Delete(directoryPath);
+                                        Console.WriteLine($"[AuthController] Deleted pin photo: {directoryPath}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[AuthController] Error deleting pin photos: {ex.Message}");
+                    }
+                }
+            }
+            
+            _dbContext.Pins.RemoveRange(pins);
+
+            // Delete all messages sent by this user (including image messages)
+            var messages = await _dbContext.Messages.Where(m => m.SenderId == uid).ToListAsync();
+            
+            // Delete chat image files from disk
+            foreach (var msg in messages)
+            {
+                if (!string.IsNullOrEmpty(msg.ImageUrl))
+                {
+                    try
+                    {
+                        if (msg.ImageUrl.StartsWith("/uploads/"))
+                        {
+                            var filePath = System.IO.Path.Combine(_environment.ContentRootPath, msg.ImageUrl.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+                            if (System.IO.File.Exists(filePath))
+                            {
+                                System.IO.File.Delete(filePath);
+                                Console.WriteLine($"[AuthController] Deleted chat image: {filePath}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[AuthController] Error deleting chat image: {ex.Message}");
+                    }
+                }
+            }
+            
+            _dbContext.Messages.RemoveRange(messages);
+
+            // Delete all conversations where this user is a participant
+            var conversations = await _dbContext.Conversations.Where(c => c.User1Id == uid || c.User2Id == uid).ToListAsync();
+            _dbContext.Conversations.RemoveRange(conversations);
+
+            // Delete all friendships involving this user (both as user and as friend)
+            var friendships = await _dbContext.Friendships.Where(f => f.UserId == uid || f.FriendId == uid).ToListAsync();
+            _dbContext.Friendships.RemoveRange(friendships);
+
+            // Now delete the user
+            _dbContext.Users.Remove(user);
+            await _dbContext.SaveChangesAsync();
+
+            // Delete from Firebase Auth
             try
             {
                 await FirebaseAuth.DefaultInstance.DeleteUserAsync(uid);
             }
             catch (FirebaseAuthException)
             {
-                
+                // User may not exist in Firebase, ignore
             }
 
-            return Ok(new { message = "User account removed successfully." });
+            return Ok(new { message = "User account and all associated data removed successfully." });
         }
         catch (Exception ex)
         {
