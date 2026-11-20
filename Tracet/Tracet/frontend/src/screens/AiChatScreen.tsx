@@ -22,8 +22,9 @@ const PINK_ACCENT = '#FF2D55';
 
 interface Message {
     id: string;
-    sender: 'user' | 'ai';
+    sender: 'user' | 'ai' | 'system';
     text: string;
+    provider?: string;
 }
 
 interface Tag {
@@ -53,6 +54,7 @@ export default function AiChatScreen({ navigation, route }: any) {
     const [tags, setTags] = useState<Tag[]>([]);
     const [aiProvider, setAiProvider] = useState<'gemini' | 'tracey'>('gemini');
     const scrollViewRef = useRef<ScrollView>(null);
+    const textInputRef = useRef<TextInput>(null);
 
     const getAuthToken = async () => {
         try {
@@ -84,14 +86,20 @@ export default function AiChatScreen({ navigation, route }: any) {
         }
     };
 
-    const fetchChatHistory = useCallback(async () => {
+    const fetchChatHistory = useCallback(async (provider?: string) => {
         try {
             const token = await getAuthToken();
             if (!token) {
-                setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+                const welcomeMsg = provider === 'tracey'
+                    ? 'Hi! I\'m Tracey, your travel assistant. How can I help?'
+                    : 'Hi! I\'m Gemini, your personal travel guide. How can I help with your travels today?';
+                setMessages([{ id: 'welcome', sender: 'ai', text: welcomeMsg }]);
                 return;
             }
-            const response = await fetch(`${API_BASE_URL}/api/ai/history`, {
+            const url = provider
+                ? `${API_BASE_URL}/api/ai/history?provider=${provider}`
+                : `${API_BASE_URL}/api/ai/history`;
+            const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
@@ -99,19 +107,29 @@ export default function AiChatScreen({ navigation, route }: any) {
                 const msgs: Message[] = data.map((item: any) => ({
                     id: item.id,
                     sender: item.sender === 'user' ? 'user' : 'ai',
-                    text: item.text
+                    text: item.text,
+                    provider: item.provider || 'gemini'
                 }));
                 if (msgs.length === 0) {
-                    setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+                    const welcomeMsg = provider === 'tracey'
+                        ? 'Hi! I\'m Tracey, your travel assistant. How can I help?'
+                        : 'Hi! I\'m Gemini, your personal travel guide. How can I help with your travels today?';
+                    setMessages([{ id: 'welcome', sender: 'ai', text: welcomeMsg }]);
                 } else {
                     setMessages(msgs);
                 }
             } else {
-                setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+                const welcomeMsg = provider === 'tracey'
+                    ? 'Hi! I\'m Tracey, your travel assistant. How can I help?'
+                    : 'Hi! I\'m Gemini, your personal travel guide. How can I help with your travels today?';
+                setMessages([{ id: 'welcome', sender: 'ai', text: welcomeMsg }]);
             }
         } catch (err) {
             console.log('Error fetching chat history:', err);
-            setMessages([{ id: 'welcome', sender: 'ai', text: 'Hi! I\'m Tracet AI, your personal travel guide. How can I help with your travels today?' }]);
+            const welcomeMsg = provider === 'tracey'
+                ? 'Hi! I\'m Tracey, your travel assistant. How can I help?'
+                : 'Hi! I\'m Gemini, your personal travel guide. How can I help with your travels today?';
+            setMessages([{ id: 'welcome', sender: 'ai', text: welcomeMsg }]);
         }
     }, []);
 
@@ -181,23 +199,26 @@ export default function AiChatScreen({ navigation, route }: any) {
     useEffect(() => {
         fetchTags();
         fetchRecommendations();
-        fetchChatHistory();
-    }, [fetchRecommendations, fetchChatHistory]);
+        // Load history for the current provider (default: gemini)
+        fetchChatHistory(aiProvider);
+    }, [fetchRecommendations, fetchChatHistory, aiProvider]);
 
     useFocusEffect(
         useCallback(() => {
             fetchRecommendations();
-            fetchChatHistory();
-        }, [fetchRecommendations, fetchChatHistory])
+            // Load history for the current provider when screen gains focus
+            fetchChatHistory(aiProvider);
+        }, [fetchRecommendations, fetchChatHistory, aiProvider])
     );
 
     const handleSend = async (textToSend?: string) => {
         const text = textToSend || inputText;
         if (!text.trim()) return;
 
-        const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: text.trim() };
+        setInputText('');
+        textInputRef.current?.clear();
+        const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: text.trim(), provider: aiProvider };
         setMessages(prev => [...prev, userMsg]);
-        if (!textToSend) setInputText('');
         setLoading(true);
 
         try {
@@ -208,23 +229,43 @@ export default function AiChatScreen({ navigation, route }: any) {
                 return;
             }
 
+            // Add fetch timeout to match backend Gemini timeout (60s) + Tracey buffer
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 90000);
+
             const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ message: text.trim() })
-            });
+                body: JSON.stringify({ message: text.trim(), provider: aiProvider }),
+                signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
 
             if (response.ok) {
                 const data = await response.json();
-                const aiMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    sender: 'ai',
-                    text: data.response
-                };
-                setMessages(prev => [...prev, aiMsg]);
+
+                // If Gemini is unavailable, show a message and let the user switch to Tracey manually
+                if (data.geminiUnavailable && aiProvider === 'gemini') {
+                    // Remove the user message we just added since it wasn't saved to backend history
+                    setMessages(prev => prev.slice(0, -1));
+                    // Show system message suggesting to switch to Tracey
+                    setMessages(prev => [...prev, {
+                        id: `system-${Date.now()}`,
+                        sender: 'system',
+                        text: data.response || 'Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.'
+                    }]);
+                } else {
+                    // Normal AI response
+                    const aiMsg: Message = {
+                        id: (Date.now() + 1).toString(),
+                        sender: 'ai',
+                        text: data.response,
+                        provider: aiProvider
+                    };
+                    setMessages(prev => [...prev, aiMsg]);
+                }
             } else {
                 const errorData = await response.json().catch(() => ({}));
                 setMessages(prev => [...prev, {
@@ -235,10 +276,15 @@ export default function AiChatScreen({ navigation, route }: any) {
             }
         } catch (err) {
             console.log('Error sending message to AI:', err);
+            // Network error to backend or timeout — can't reach server at all
+            let errorMsg = 'Sorry, I couldn\'t reach the server. Please check your connection and try again.';
+            if (err instanceof Error && err.name === 'AbortError') {
+                errorMsg = 'The request took too long. Please try again.';
+            }
             setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
                 sender: 'ai',
-                text: 'Sorry, I couldn\'t reach the AI service. Please check your connection and try again.'
+                text: errorMsg
             }]);
         } finally {
             setLoading(false);
@@ -291,6 +337,19 @@ export default function AiChatScreen({ navigation, route }: any) {
                 >
                     {messages.map((msg) => {
                         const isAi = msg.sender === 'ai';
+                        const isSystem = msg.sender === 'system';
+                        
+                        if (isSystem) {
+                            return (
+                                <View key={msg.id} style={styles.systemMessageRow}>
+                                    <View style={styles.systemMessageBubble}>
+                                        <Ionicons name="alert-circle" size={12} color="#A1A1AA" />
+                                        <Text style={styles.systemMessageText}>{msg.text}</Text>
+                                    </View>
+                                </View>
+                            );
+                        }
+                        
                         return (
                             <View key={msg.id} style={[styles.bubbleRow, isAi ? styles.rowAi : styles.rowUser]}>
                                 {isAi && (
@@ -342,15 +401,33 @@ export default function AiChatScreen({ navigation, route }: any) {
 
                 <View style={styles.inputBar}>
                     <TextInput
+                        ref={textInputRef}
                         style={styles.inputField}
-                        placeholder="Ask AI..."
+                        placeholder={aiProvider === 'tracey' ? 'Ask Tracey...' : 'Ask Gemini...'}
                         placeholderTextColor="#71717A"
                         value={inputText}
                         onChangeText={setInputText}
                         multiline
+                        returnKeyType="send"
+                        blurOnSubmit={false}
+                        textAlignVertical="top"
+                        onSubmitEditing={() => handleSend()}
                     />
-                    <TouchableOpacity onPress={() => setAiProvider(aiProvider === 'gemini' ? 'tracey' : 'gemini')} style={styles.providerBtn}>
-                        <Text style={styles.providerBtnText}>{aiProvider === 'gemini' ? 'Gemini' : 'Tracey'}</Text>
+                    <TouchableOpacity 
+                        onPress={() => {
+                            const newProvider = aiProvider === 'gemini' ? 'tracey' : 'gemini';
+                            setAiProvider(newProvider);
+                            // Load the separate chat history for the selected provider
+                            fetchChatHistory(newProvider);
+                        }} 
+                        style={[styles.providerBtn, aiProvider === 'tracey' ? styles.providerBtnTracey : {}]}
+                    >
+                        <View style={styles.providerBtnContent}>
+                            <View style={[styles.providerDot, aiProvider === 'tracey' ? styles.providerDotActive : styles.providerDotInactive]} />
+                            <Text style={[styles.providerBtnText, aiProvider === 'tracey' ? styles.providerBtnTextTracey : {}]}>
+                                {aiProvider === 'tracey' ? 'Tracey' : 'Gemini'}
+                            </Text>
+                        </View>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => handleSend()} style={styles.sendBtn}>
                         <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
@@ -422,8 +499,8 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.06)'
     },
     providerBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
         borderRadius: 16,
         backgroundColor: '#1C1C1E',
         borderWidth: 1,
@@ -432,10 +509,53 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center'
     },
+    providerBtnTracey: {
+        backgroundColor: 'rgba(255,45,85,0.15)',
+        borderColor: 'rgba(255,45,85,0.4)'
+    },
+    providerBtnContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4
+    },
+    providerDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3
+    },
+    providerDotActive: {
+        backgroundColor: PINK_ACCENT
+    },
+    providerDotInactive: {
+        backgroundColor: '#34C759'
+    },
     providerBtnText: {
         color: '#E4E4E7',
         fontSize: 11,
         fontWeight: '600'
+    },
+    providerBtnTextTracey: {
+        color: PINK_ACCENT
+    },
+    systemMessageRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginBottom: 12,
+        marginTop: 4
+    },
+    systemMessageBubble: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,45,85,0.08)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        gap: 6
+    },
+    systemMessageText: {
+        color: '#A1A1AA',
+        fontSize: 11,
+        fontStyle: 'italic'
     },
     sendBtn: {
         width: 38,

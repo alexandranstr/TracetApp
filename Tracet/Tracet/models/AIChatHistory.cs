@@ -9,4 +9,7 @@ public class AIChatHistory
     public string Role { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    
+    // Which AI provider handled this message: "gemini" or "tracey"
+    public string? Provider { get; set; } = "gemini";
 }

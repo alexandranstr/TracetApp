@@ -272,6 +272,7 @@ export default function CreatePinOverlay({
                 placeName: selectedLocation.placeName || '',
                 entityType: selectedLocation.entityType ?? 0,
                 googlePlaceId: selectedLocation.googlePlaceId || '',
+                category: selectedCategory,
             } : null,
             photoUrlsJson: JSON.stringify(photoUrls),
             tagsVectorJson: JSON.stringify(selectedTagIds),
