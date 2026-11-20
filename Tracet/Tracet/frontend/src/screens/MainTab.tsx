@@ -59,6 +59,15 @@ export default function MainTab({ navigation, route }: any) {
     const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
     const [totalUnreadMessages, setTotalUnreadMessages] = useState<number>(0);
     const [isAuthSynced, setIsAuthSynced] = useState<boolean>(false);
+    
+    // Map region state for bounding box queries
+    const [mapRegion, setMapRegion] = useState<{
+        latitude: number;
+        longitude: number;
+        latitudeDelta: number;
+        longitudeDelta: number;
+    } | null>(null);
+    const nearbyFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -111,10 +120,9 @@ export default function MainTab({ navigation, route }: any) {
             });
             if (res.ok) {
                 const data = await res.json();
-                if (Array.isArray(data)) {
-                    const count = data.reduce((acc: number, item: any) => acc + (item.unreadCount || 0), 0);
-                    setTotalUnreadMessages(count);
-                }
+                const conversations = data.conversations || [];
+                const count = conversations.reduce((acc: number, item: any) => acc + (item.unreadCount || 0), 0);
+                setTotalUnreadMessages(count);
             }
         } catch (err) {
             console.log('Error fetching unread messages count:', err);
@@ -126,18 +134,61 @@ export default function MainTab({ navigation, route }: any) {
             const token = await getAuthToken();
             if (!token) return;
 
-            const response = await fetch(`${API_BASE_URL}/api/pins`, {
+            const response = await fetch(`${API_BASE_URL}/api/pins?page=1&pageSize=200`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
             });
             if (response.ok) {
                 const data = await response.json();
-                setSavedPins(data);
+                // API now returns { pins: [...], pagination: {...} }
+                setSavedPins(data.pins || data);
             }
         } catch (error) {
             console.log('Error fetching pins from backend:', error);
         }
+    };
+
+    // Fetch pins within the visible map region (bounding box)
+    const fetchNearbyPins = async (region: any) => {
+        try {
+            const token = await getAuthToken();
+            if (!token) return;
+
+            // Calculate bounding box from region
+            const swLat = region.latitude - region.latitudeDelta;
+            const swLng = region.longitude - region.longitudeDelta;
+            const neLat = region.latitude + region.latitudeDelta;
+            const neLng = region.longitude + region.longitudeDelta;
+
+            const response = await fetch(
+                `${API_BASE_URL}/api/pins/nearby?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setSavedPins(data);
+            }
+        } catch (error) {
+            console.log('Error fetching nearby pins:', error);
+        }
+    };
+
+    // Handle map region change with debounce
+    const handleRegionChangeComplete = (region: any) => {
+        setMapRegion(region);
+        
+        // Debounce fetch requests
+        if (nearbyFetchTimeoutRef.current) {
+            clearTimeout(nearbyFetchTimeoutRef.current);
+        }
+        nearbyFetchTimeoutRef.current = setTimeout(() => {
+            fetchNearbyPins(region);
+        }, 300);
     };
 
     useFocusEffect(
@@ -215,6 +266,63 @@ export default function MainTab({ navigation, route }: any) {
             };
         });
     };
+
+    // Simple marker clustering: group nearby markers into clusters
+    interface ClusteredMarker {
+        id: string;
+        latitude: number;
+        longitude: number;
+        pins: PinData[];
+        isCluster: boolean;
+    }
+
+    const CLUSTER_DISTANCE = 0.015; // ~1.5km threshold for clustering
+
+    const clusterPins = (pins: PinData[]): ClusteredMarker[] => {
+        if (pins.length === 0) return [];
+
+        const used = new Set<number>();
+        const clusters: ClusteredMarker[] = [];
+
+        for (let i = 0; i < pins.length; i++) {
+            if (used.has(i)) continue;
+            if (!pins[i]?.location?.latitude || !pins[i]?.location?.longitude) continue;
+
+            const cluster: PinData[] = [pins[i]];
+            used.add(i);
+
+            for (let j = i + 1; j < pins.length; j++) {
+                if (used.has(j)) continue;
+                if (!pins[j]?.location?.latitude || !pins[j]?.location?.longitude) continue;
+
+                const latDiff = Math.abs(pins[i].location.latitude - pins[j].location.latitude);
+                const lngDiff = Math.abs(pins[i].location.longitude - pins[j].location.longitude);
+
+                if (latDiff < CLUSTER_DISTANCE && lngDiff < CLUSTER_DISTANCE) {
+                    cluster.push(pins[j]);
+                    used.add(j);
+                }
+            }
+
+            // Calculate cluster center
+            const avgLat = cluster.reduce((sum, p) => sum + p.location!.latitude, 0) / cluster.length;
+            const avgLng = cluster.reduce((sum, p) => sum + p.location!.longitude, 0) / cluster.length;
+
+            clusters.push({
+                id: cluster.map(p => p.id).join('-'),
+                latitude: avgLat,
+                longitude: avgLng,
+                pins: cluster,
+                isCluster: cluster.length > 1
+            });
+        }
+
+        return clusters;
+    };
+
+    const clusteredMarkers = useMemo(() => {
+        return clusterPins(savedPins);
+    }, [savedPins]);
 
     const displayPins = useMemo(() => {
         return applyCoordinateOffsets(savedPins);
@@ -525,6 +633,7 @@ export default function MainTab({ navigation, route }: any) {
                             showsMyLocationButton={false}
                             showsCompass={false}
                             onPress={handleMapPress}
+                            onRegionChangeComplete={handleRegionChangeComplete}
                             initialRegion={{
                                 latitude: 20.0,
                                 longitude: 0.0,
@@ -541,24 +650,60 @@ export default function MainTab({ navigation, route }: any) {
                                 />
                             )}
 
-                            {displayPins.map((pin) => {
-                                if (!pin?.location?.latitude || !pin?.location?.longitude) return null;
-                                return (
-                                    <Marker
-                                        key={pin.id}
-                                        coordinate={{
-                                            latitude: pin.location.latitude,
-                                            longitude: pin.location.longitude,
-                                        }}
-                                        anchor={{ x: 0.5, y: 1.0 }}
-                                        centerOffset={{ x: 0, y: -20 }}
-                                        tracksViewChanges={false}
-                                        onPress={() => setInspectedPin(pin)}
-                                    >
-                                        <CustomMapMarker pin={pin} currentUserId={currentUserId} />
-                                    </Marker>
-                                );
-                            })}
+                            {clusteredMarkers.map((cluster) => (
+                                <Marker
+                                    key={cluster.id}
+                                    coordinate={{
+                                        latitude: cluster.latitude,
+                                        longitude: cluster.longitude,
+                                    }}
+                                    anchor={{ x: 0.5, y: 1.0 }}
+                                    centerOffset={{ x: 0, y: -20 }}
+                                    tracksViewChanges={false}
+                                    onPress={() => {
+                                        if (cluster.isCluster) {
+                                            // Zoom into cluster area
+                                            const latDelta = Math.max(
+                                                ...cluster.pins.map(p => p.location!.latitude)
+                                            ) - Math.min(
+                                                ...cluster.pins.map(p => p.location!.latitude)
+                                            );
+                                            const lngDelta = Math.max(
+                                                ...cluster.pins.map(p => p.location!.longitude)
+                                            ) - Math.min(
+                                                ...cluster.pins.map(p => p.location!.longitude)
+                                            );
+                                            mapRef.current?.animateToRegion({
+                                                latitude: cluster.latitude,
+                                                longitude: cluster.longitude,
+                                                latitudeDelta: Math.max(latDelta * 2, 0.01),
+                                                longitudeDelta: Math.max(lngDelta * 2, 0.01),
+                                            }, 800);
+                                        } else {
+                                            setInspectedPin(cluster.pins[0]);
+                                        }
+                                    }}
+                                >
+                                    {cluster.isCluster ? (
+                                        <View style={{
+                                            width: 40,
+                                            height: 40,
+                                            borderRadius: 20,
+                                            backgroundColor: PINK_ACCENT,
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            borderWidth: 2,
+                                            borderColor: '#FFFFFF',
+                                        }}>
+                                            <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 }}>
+                                                {cluster.pins.length}
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <CustomMapMarker pin={cluster.pins[0]} currentUserId={currentUserId} />
+                                    )}
+                                </Marker>
+                            ))}
 
                             {selectedPoint && (
                                 <Marker
@@ -620,6 +765,12 @@ export default function MainTab({ navigation, route }: any) {
                                                 </Text>
                                             </View>
                                         )}
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.iconButton}
+                                        onPress={() => navigation?.navigate('SharedHistory')}
+                                    >
+                                        <Ionicons name="globe" size={20} color="#FFFFFF" />
                                     </TouchableOpacity>
                                 </View>
                             </View>

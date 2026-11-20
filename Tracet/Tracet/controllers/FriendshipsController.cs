@@ -2,6 +2,7 @@ using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using Tracet.data;
 using Tracet.models;
 
@@ -31,7 +32,7 @@ public class FriendshipsController : ControllerBase
 
         try
         {
-            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
             return (decodedToken.Uid, null);
         }
         catch (FirebaseAuthException ex)
@@ -108,10 +109,13 @@ public class FriendshipsController : ControllerBase
     }
 
     [HttpGet("social-overview")]
-    public async Task<IActionResult> GetSocialOverview()
+    public async Task<IActionResult> GetSocialOverview([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
+
+        page = Math.Max(1, page);
+        pageSize = Math.Max(1, Math.Min(100, pageSize));
 
         var friendships = await _context.Friendships
             .Where(f => f.UserId == userId || f.FriendId == userId)
@@ -162,23 +166,47 @@ public class FriendshipsController : ControllerBase
             }
         }
 
+        // Paginate friends list
+        var totalFriends = friends.Count;
+        var totalPages = (int)Math.Ceiling((double)totalFriends / pageSize);
+        var paginatedFriends = friends.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
         return Ok(new
         {
-            friends,
+            friends = paginatedFriends,
             incomingRequests,
-            outgoingRequests
+            outgoingRequests,
+            pagination = new
+            {
+                currentPage = page,
+                pageSize,
+                totalFriends,
+                totalPages,
+                hasPreviousPage = page > 1,
+                hasNextPage = page < totalPages
+            }
         });
     }
 
     [HttpGet("requests")]
-    public async Task<IActionResult> GetPendingRequests()
+    public async Task<IActionResult> GetPendingRequests([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
 
-        var pendingRequests = await _context.Friendships
+        page = Math.Max(1, page);
+        pageSize = Math.Max(1, Math.Min(50, pageSize));
+
+        var query = _context.Friendships
             .Include(f => f.User)
-            .Where(f => f.FriendId == userId && (f.Status == "Pending" || f.Status == "pending"))
+            .Where(f => f.FriendId == userId && (f.Status == "Pending" || f.Status == "pending"));
+
+        var totalRequests = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling((double)totalRequests / pageSize);
+
+        var pendingRequests = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(f => new
             {
                 f.Id,
@@ -191,8 +219,17 @@ public class FriendshipsController : ControllerBase
 
         return Ok(new
         {
-            count = pendingRequests.Count,
-            requests = pendingRequests
+            count = totalRequests,
+            requests = pendingRequests,
+            pagination = new
+            {
+                currentPage = page,
+                pageSize,
+                totalRequests,
+                totalPages,
+                hasPreviousPage = page > 1,
+                hasNextPage = page < totalPages
+            }
         });
     }
 
@@ -336,7 +373,120 @@ public class FriendshipsController : ControllerBase
 
         return Ok(new { message = $"Synchronized successfully. Created {addedCount} conversations." });
     }
+
+    [HttpPost("block")]
+    public async Task<IActionResult> BlockUser([FromBody] BlockUserDto dto)
+    {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        if (userId == dto.TargetUserId)
+            return BadRequest(new { message = "You cannot block yourself." });
+
+        var targetExists = await _context.Users.AnyAsync(u => u.Id == dto.TargetUserId);
+        if (!targetExists)
+            return NotFound(new { message = "User not found." });
+
+        // Check if already blocked
+        var alreadyBlocked = await _context.BlockedUsers.AnyAsync(b => b.UserId == userId && b.BlockedUserId == dto.TargetUserId);
+        if (alreadyBlocked)
+            return BadRequest(new { message = "User is already blocked." });
+
+        var block = new BlockedUser
+        {
+            UserId = userId!,
+            BlockedUserId = dto.TargetUserId,
+            BlockedAt = DateTime.UtcNow
+        };
+
+        _context.BlockedUsers.Add(block);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { success = true, message = "User has been blocked." });
+    }
+
+    [HttpPost("unblock")]
+    public async Task<IActionResult> UnblockUser([FromBody] BlockUserDto dto)
+    {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        var block = await _context.BlockedUsers.FirstOrDefaultAsync(b => b.UserId == userId && b.BlockedUserId == dto.TargetUserId);
+        if (block == null)
+            return NotFound(new { message = "User is not blocked." });
+
+        _context.BlockedUsers.Remove(block);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { success = true, message = "User has been unblocked." });
+    }
+
+    [HttpGet("block-status/{targetUserId}")]
+    public async Task<IActionResult> GetBlockStatus(string targetUserId)
+    {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        var youBlockedThem = await _context.BlockedUsers.AnyAsync(b => b.UserId == userId && b.BlockedUserId == targetUserId);
+        var theyBlockedYou = await _context.BlockedUsers.AnyAsync(b => b.BlockedUserId == userId && b.UserId == targetUserId);
+
+        return Ok(new
+        {
+            youBlockedPartner = youBlockedThem,
+            partnerBlockedYou = theyBlockedYou
+        });
+    }
+
+    [HttpGet("blocked")]
+    public async Task<IActionResult> GetBlockedUsers([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
+        if (errorResult != null) return errorResult;
+
+        page = Math.Max(1, page);
+        pageSize = Math.Max(1, Math.Min(50, pageSize));
+
+        var query = _context.BlockedUsers
+            .Include(b => b.Blocked)
+            .Where(b => b.UserId == userId)
+            .OrderByDescending(b => b.BlockedAt);
+
+        var totalBlocked = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling((double)totalBlocked / pageSize);
+
+        var blockedUsersData = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        var blockedUsers = blockedUsersData.Select(b => new
+        {
+            b.BlockedUserId,
+            Username = b.Blocked?.Username ?? "",
+            DisplayName = b.Blocked != null
+                ? (string.IsNullOrWhiteSpace(b.Blocked.DisplayName) ? b.Blocked.Username : b.Blocked.DisplayName)
+                : "",
+            PhotoUrl = b.Blocked?.PhotoUrl,
+            b.BlockedAt
+        }).ToList();
+
+        return Ok(new
+        {
+            blockedUsers,
+            pagination = new
+            {
+                currentPage = page,
+                pageSize,
+                totalBlocked,
+                totalPages,
+                hasPreviousPage = page > 1,
+                hasNextPage = page < totalPages
+            }
+        });
+    }
+
 }
 
-public record SendFriendRequestDto(string ReceiverId);
-public record RespondRequestDto(string SenderId, string Action);
+public record SendFriendRequestDto([Required] string ReceiverId);
+public record RespondRequestDto([Required] string SenderId, [Required] string Action);
+public record BlockUserDto([Required] string TargetUserId);

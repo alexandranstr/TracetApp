@@ -15,7 +15,8 @@ import {
     Dimensions,
     TouchableWithoutFeedback,
     Keyboard,
-    Platform
+    Platform,
+    Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -84,6 +85,9 @@ export default function ChatScreen({ navigation, route }: any) {
     const [loading, setLoading] = useState(true);
     const [backgroundTheme, setBackgroundTheme] = useState<string>('default');
     const [messageColor, setMessageColor] = useState<string>('#FF2D55');
+    const [youBlockedPartner, setYouBlockedPartner] = useState<boolean | null>(route.params?.youBlockedPartner ?? null);
+    const [partnerBlockedYou, setPartnerBlockedYou] = useState<boolean | null>(route.params?.partnerBlockedYou ?? null);
+    const [fetchingBlockStatus, setFetchingBlockStatus] = useState(false);
 
     const [isThemeModalVisible, setIsThemeModalVisible] = useState(false);
     const [selectedThemeCandidate, setSelectedThemeCandidate] = useState<string>('default');
@@ -97,6 +101,7 @@ export default function ChatScreen({ navigation, route }: any) {
 
     const [partnerTyping, setPartnerTyping] = useState(false);
     const [signalRConnection, setSignalRConnection] = useState<signalR.HubConnection | null>(null);
+    const [blockingUser, setBlockingUser] = useState(false);
 
     const scrollViewRef = useRef<ScrollView>(null);
     const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,6 +261,11 @@ export default function ChatScreen({ navigation, route }: any) {
                         });
 
                         setupSignalR(activeId);
+                    }
+
+                    // Fetch block status if not already provided by ConversationsScreen
+                    if (youBlockedPartner === null && partnerId) {
+                        await fetchBlockStatus();
                     }
                 } catch (err) {
                     console.log('Error initializing chat:', err);
@@ -570,6 +580,89 @@ export default function ChatScreen({ navigation, route }: any) {
         });
     };
 
+    const fetchBlockStatus = async () => {
+        if (!partnerId || youBlockedPartner !== null || fetchingBlockStatus) return;
+        try {
+            setFetchingBlockStatus(true);
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/block-status/${partnerId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setYouBlockedPartner(data.youBlockedPartner);
+                setPartnerBlockedYou(data.partnerBlockedYou);
+            }
+        } catch (err) {
+            console.log('Error fetching block status:', err);
+        } finally {
+            setFetchingBlockStatus(false);
+        }
+    };
+
+    const handleBlockUser = () => {
+        if (!partnerId) return;
+        Alert.alert(
+            'Block User',
+            `Are you sure you want to block ${partnerName}? They won't be able to message you or see your pins.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Block',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            setBlockingUser(true);
+                            const token = await getAuthToken();
+                            const res = await fetch(`${API_BASE_URL}/api/friendships/block`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({ targetUserId: partnerId })
+                            });
+                            const data = await res.json();
+                            if (res.ok) {
+                                setYouBlockedPartner(true);
+                                Alert.alert('Blocked', 'User has been blocked.', [
+                                    { text: 'OK', onPress: () => navigation.goBack() }
+                                ]);
+                            } else {
+                                Alert.alert('Error', data.message || 'Failed to block user.');
+                            }
+                        } catch (err) {
+                            console.log('Error blocking user:', err);
+                            Alert.alert('Error', 'Failed to block user. Please try again.');
+                        } finally {
+                            setBlockingUser(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleUnblockUser = async () => {
+        if (!partnerId) return;
+        try {
+            const token = await getAuthToken();
+            const res = await fetch(`${API_BASE_URL}/api/friendships/unblock`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId: partnerId })
+            });
+            if (res.ok) {
+                setYouBlockedPartner(false);
+            }
+        } catch (err) {
+            console.log('Error unblocking user:', err);
+        }
+    };
+
     const activeThemeObj = BACKGROUND_THEMES.find(t => t.id === backgroundTheme);
 
     return (
@@ -597,10 +690,40 @@ export default function ChatScreen({ navigation, route }: any) {
                         )}
                     </View>
 
+                    {youBlockedPartner ? (
+                        <TouchableOpacity onPress={() => handleUnblockUser()} style={styles.themeBtn}>
+                            <Ionicons name="ban" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity onPress={() => handleBlockUser()} style={styles.themeBtn} disabled={blockingUser}>
+                            {blockingUser ? (
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                                <Ionicons name="ban-outline" size={20} color="#FFFFFF" />
+                            )}
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity onPress={() => setIsThemeModalVisible(true)} style={styles.themeBtn}>
                         <Ionicons name="color-palette-outline" size={20} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
+
+                {/* Block status banner */}
+                {youBlockedPartner && (
+                    <View style={styles.blockBanner}>
+                        <Ionicons name="ban" size={18} color="#EF4444" />
+                        <Text style={styles.blockBannerText}>You blocked this person</Text>
+                        <TouchableOpacity onPress={() => handleUnblockUser()}>
+                            <Text style={styles.blockBannerUnblock}>Unblock</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+                {partnerBlockedYou && (
+                    <View style={styles.blockedByBanner}>
+                        <Ionicons name="lock-closed" size={18} color="#F59E0B" />
+                        <Text style={styles.blockedByBannerText}>This person blocked you</Text>
+                    </View>
+                )}
             </SafeAreaView>
 
             <KeyboardAvoidingView
@@ -857,5 +980,42 @@ const styles = StyleSheet.create({
     colorSwatch: { width: 54, marginRight: 12, alignItems: 'center', paddingVertical: 6, borderRadius: 12, borderWidth: 2, borderColor: 'transparent' },
     colorSwatchSelected: { backgroundColor: 'rgba(255,255,255,0.08)' },
     colorCircle: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-    colorName: { color: '#D4D4D8', fontSize: 10, fontWeight: '500', textAlign: 'center' }
+    colorName: { color: '#D4D4D8', fontSize: 10, fontWeight: '500', textAlign: 'center' },
+    blockBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(239, 68, 68, 0.2)'
+    },
+    blockBannerText: {
+        flex: 1,
+        color: '#EF4444',
+        fontSize: 13,
+        fontWeight: '600'
+    },
+    blockBannerUnblock: {
+        color: '#10B981',
+        fontSize: 13,
+        fontWeight: '700'
+    },
+    blockedByBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(245, 158, 11, 0.2)'
+    },
+    blockedByBannerText: {
+        flex: 1,
+        color: '#F59E0B',
+        fontSize: 13,
+        fontWeight: '600'
+    }
 });

@@ -104,7 +104,7 @@ export default function AiChatScreen({ navigation, route }: any) {
             });
             if (response.ok) {
                 const data = await response.json();
-                const msgs: Message[] = data.map((item: any) => ({
+                const msgs: Message[] = (data.messages || []).map((item: any) => ({
                     id: item.id,
                     sender: item.sender === 'user' ? 'user' : 'ai',
                     text: item.text,

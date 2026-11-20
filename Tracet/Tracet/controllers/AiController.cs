@@ -2,6 +2,9 @@ using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Retry;
 using System.Text;
 using System.Text.Json;
 using Tracet.data;
@@ -12,18 +15,99 @@ namespace Tracet.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [EnableRateLimiting("global")]
+    [EnableRateLimiting("ai")]
     public class AiController : ControllerBase
     {
         private readonly AppDbContext _context;
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
+        private readonly Polly.Retry.AsyncRetryPolicy<string> _geminiRetryPolicy;
+        private readonly IAsyncPolicy _geminiCircuitBreakerPolicy;
+
+        // Input validation limits
+        private const int MaxMessageLength = 2000;
+        private const int MaxHistoryMessages = 20;
 
         public AiController(AppDbContext context, HttpClient httpClient, IConfiguration configuration)
         {
             _context = context;
             _httpClient = httpClient;
             _configuration = configuration;
+
+            // Retry policy: 3 attempts with exponential backoff (2s, 4s, 8s)
+            _geminiRetryPolicy = Policy
+                .HandleResult<string>(result => result == "RETRY")
+                .Or<System.Net.Sockets.SocketException>()
+                .Or<System.IO.IOException>()
+                .WaitAndRetryAsync(3, retryAttempt =>
+                    TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                    (outcome, timespan, retryAttempt, context) =>
+                    {
+                        Console.WriteLine($"[AiController] Gemini retry #{retryAttempt} after {(int)timespan.TotalSeconds}s due to: {outcome.Exception?.Message ?? outcome.Result}");
+                    });
+
+            // Circuit breaker: opens after 5 consecutive failures, stays open for 30 seconds
+            _geminiCircuitBreakerPolicy = Policy
+                .Handle<Exception>()
+                .CircuitBreakerAsync(
+                    exceptionsAllowedBeforeBreaking: 5,
+                    durationOfBreak: TimeSpan.FromSeconds(30),
+                    onBreak: (ex, timespan) =>
+                    {
+                        Console.WriteLine($"[AiController] Gemini circuit breaker OPENED for {(int)timespan.TotalSeconds}s due to: {ex?.Message ?? "unknown"}");
+                    },
+                    onReset: () =>
+                    {
+                        Console.WriteLine("[AiController] Gemini circuit breaker CLOSED — resuming requests");
+                    });
+        }
+
+        // Check for prompt injection attacks; returns true if injection detected
+        private bool DetectPromptInjection(string message)
+        {
+            var lowerMessage = message.ToLower();
+            var injectionPatterns = new[]
+            {
+                "ignore the above",
+                "ignore instructions",
+                "disregard above",
+                "forget your instructions",
+                "system prompt",
+                "you are now",
+                "pretend to be",
+                "act as if you were",
+                "ignore all previous",
+                "repeat the prompt",
+                "print the prompt",
+                "what is your prompt",
+                "what are your instructions",
+                " disregard",
+                "ignore instructions above"
+            };
+
+            foreach (var pattern in injectionPatterns)
+            {
+                if (lowerMessage.Contains(pattern))
+                {
+                    Console.WriteLine($"[AiController] Blocked: Prompt injection detected: '{pattern}' in user message");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Helper: remove the last user message from history (when Gemini fails)
+        private async Task RemoveLastUserMessage(string? userId)
+        {
+            var lastUserMessage = await _context.AIChatHistories
+                .OrderByDescending(h => h.Timestamp)
+                .FirstOrDefaultAsync(h => h.UserId == userId && h.Role == "user");
+            if (lastUserMessage != null)
+            {
+                _context.AIChatHistories.Remove(lastUserMessage);
+                await _context.SaveChangesAsync();
+            }
         }
 
         // Simple city/location detection from user message
@@ -226,7 +310,7 @@ namespace Tracet.Controllers
 
             try
             {
-                FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+                FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
                 return (decodedToken.Uid, null);
             }
             catch (Exception ex)
@@ -236,10 +320,13 @@ namespace Tracet.Controllers
         }
 
         [HttpGet("history")]
-        public async Task<IActionResult> GetHistory([FromQuery] string? provider = null)
+        public async Task<IActionResult> GetHistory([FromQuery] string? provider = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
         {
             var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
             if (errorResult != null) return errorResult;
+
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, Math.Min(100, pageSize));
 
             var query = _context.AIChatHistories.Where(h => h.UserId == userId);
 
@@ -259,8 +346,13 @@ namespace Tracet.Controllers
                 }
             }
 
+            var totalMessages = await query.CountAsync();
+            var totalPages = (int)Math.Ceiling((double)totalMessages / pageSize);
+
             var history = await query
                 .OrderBy(h => h.Timestamp)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
 
             var result = history.Select(h => new
@@ -272,7 +364,19 @@ namespace Tracet.Controllers
                 provider = h.Provider ?? "gemini"
             });
 
-            return Ok(result);
+            return Ok(new
+            {
+                messages = result,
+                pagination = new
+                {
+                    currentPage = page,
+                    pageSize,
+                    totalMessages,
+                    totalPages,
+                    hasPreviousPage = page > 1,
+                    hasNextPage = page < totalPages
+                }
+            });
         }
 
         [HttpPost("chat")]
@@ -288,6 +392,19 @@ namespace Tracet.Controllers
                     return BadRequest(new { message = "Message cannot be empty." });
                 }
 
+                // Validate message length
+                var message = dto.Message.Length > MaxMessageLength ? dto.Message.Substring(0, MaxMessageLength) : dto.Message;
+                if (dto.Message.Length > MaxMessageLength)
+                {
+                    Console.WriteLine($"[AiController] Warning: User message truncated to {MaxMessageLength} characters");
+                }
+
+                // Block prompt injection attempts
+                if (DetectPromptInjection(message))
+                {
+                    return BadRequest(new { message = "Your message contains patterns that are not allowed. Please rephrase your question." });
+                }
+
                 // Determine which provider to use
                 // If user explicitly selected "tracey", use Tracey directly (no fallback message)
                 // Otherwise, default to Gemini with Tracey as fallback
@@ -298,7 +415,7 @@ namespace Tracet.Controllers
                 {
                     UserId = userId!,
                     Role = "user",
-                    Content = dto.Message,
+                    Content = message,
                     Timestamp = DateTime.UtcNow,
                     Provider = isManualTraceySelection ? "tracey" : "gemini"
                 });
@@ -394,8 +511,8 @@ namespace Tracet.Controllers
                 }
 
                 // Detect city and category from message, then add relevant DB locations
-                var detectedCity = DetectCityFromMessage(dto.Message, allLocations);
-                var detectedCategory = DetectCategoryFromMessage(dto.Message);
+                var detectedCity = DetectCityFromMessage(message, allLocations);
+                var detectedCategory = DetectCategoryFromMessage(message);
                 if (!string.IsNullOrEmpty(detectedCity))
                 {
                     var cityLocations = GetLocationsForCity(detectedCity, detectedCategory, allLocations, allLocationTags, allTagMap);
@@ -444,7 +561,7 @@ namespace Tracet.Controllers
                 if (isManualTraceySelection)
                 {
                     Console.WriteLine("[AiController] User manually selected Tracey");
-                    string traceyResponse = await CallOllamaAsync(systemPrompt, dto.Message, history);
+                    string traceyResponse = await CallOllamaAsync(systemPrompt, message, history);
 
                     _context.AIChatHistories.Add(new AIChatHistory
                     {
@@ -465,26 +582,18 @@ namespace Tracet.Controllers
 
                 if (string.IsNullOrEmpty(apiKey))
                 {
-                    Console.WriteLine("[AiController] WARNING: GeminiApiKey is not configured!");
-                    Console.WriteLine("[AiController] Set GeminiApiKey in appsettings.json or environment variable to use Gemini.");
+                    Console.WriteLine("[AiController] FALLBACK: GeminiApiKey is not configured — user should switch to Tracey");
                     // Don't save user message to history — Gemini couldn't process it
-                    // Remove the user message we just saved
-                    var lastUserMessage = _context.AIChatHistories
-                        .OrderByDescending(h => h.Timestamp)
-                        .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                    if (lastUserMessage != null)
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
                     {
-                        _context.AIChatHistories.Remove(lastUserMessage);
-                        await _context.SaveChangesAsync();
-                    }
-                    return Ok(new 
-                    { 
                         response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                        geminiUnavailable = true 
+                        geminiUnavailable = true
                     });
                 }
 
-                try
+                // Build the Gemini API call as a reusable async function for retry policy
+                async Task<string> CallGeminiWithRetryAsync()
                 {
                     // Build conversation context for Gemini with system prompt
                     var allContents = new List<object>
@@ -492,7 +601,9 @@ namespace Tracet.Controllers
                         new { role = "user", parts = new[] { new { text = systemPrompt } } }
                     };
 
-                    allContents.AddRange(history.Select(h => new
+                    // Limit history to MaxHistoryMessages (already limited by Take(20) above, but enforce here too)
+                    var limitedHistory = history.TakeLast(MaxHistoryMessages).ToList();
+                    allContents.AddRange(limitedHistory.Select(h => new
                     {
                         role = h.Role == "user" ? "user" : "model",
                         parts = new[] { new { text = h.Content } }
@@ -527,114 +638,95 @@ namespace Tracet.Controllers
                     {
                         var jsonResponse = await response.Content.ReadAsStringAsync();
                         using var doc = JsonDocument.Parse(jsonResponse);
-                        var aiResponseText = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "Sorry, I couldn't generate a response.";
-
-                        // Gemini succeeded — save response as "gemini" provider
-                        _context.AIChatHistories.Add(new AIChatHistory
-                        {
-                            UserId = userId!,
-                            Role = "ai",
-                            Content = aiResponseText,
-                            Timestamp = DateTime.UtcNow,
-                            Provider = "gemini"
-                        });
-                        await _context.SaveChangesAsync();
-
-                        return Ok(new { response = aiResponseText, geminiUnavailable = false });
+                        return doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "Sorry, I couldn't generate a response.";
                     }
                     else
                     {
                         var errorContent = await response.Content.ReadAsStringAsync();
                         Console.WriteLine($"[AiController] Gemini API error: {response.StatusCode} - {errorContent}");
 
-                        // For all Gemini errors, tell user to switch to Tracey manually
-                        // Remove the user message we just saved since Gemini couldn't process it
-                        var lastUserMessage = _context.AIChatHistories
-                            .OrderByDescending(h => h.Timestamp)
-                            .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                        if (lastUserMessage != null)
+                        // Retry on 503 (high demand) and 429 (rate limit)
+                        if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable ||
+                            response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                         {
-                            _context.AIChatHistories.Remove(lastUserMessage);
-                            await _context.SaveChangesAsync();
+                            return "RETRY"; // Signal retry policy to retry
                         }
 
-                        return Ok(new 
-                        { 
-                            response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                            geminiUnavailable = true 
-                        });
+                        // Other errors — don't retry
+                        throw new Exception($"Gemini API error: {response.StatusCode}");
                     }
+                }
+
+                try
+                {
+                    // Execute with circuit breaker + retry policy (3 attempts, exponential backoff: 2s, 4s, 8s)
+                    // Circuit breaker opens after 5 consecutive failures, stays open for 30s
+                    string aiResponseText = await _geminiCircuitBreakerPolicy.ExecuteAsync(async () =>
+                        await _geminiRetryPolicy.ExecuteAsync(CallGeminiWithRetryAsync));
+
+                    Console.WriteLine("[AiController] Gemini API call succeeded");
+
+                    // Gemini succeeded — save response as "gemini" provider
+                    _context.AIChatHistories.Add(new AIChatHistory
+                    {
+                        UserId = userId!,
+                        Role = "ai",
+                        Content = aiResponseText,
+                        Timestamp = DateTime.UtcNow,
+                        Provider = "gemini"
+                    });
+                    await _context.SaveChangesAsync();
+
+                    return Ok(new { response = aiResponseText, geminiUnavailable = false });
+                }
+                catch (Polly.CircuitBreaker.BrokenCircuitException ex)
+                {
+                    Console.WriteLine($"[AiController] FALLBACK: Gemini circuit breaker is open (too many failures): {ex.Message}");
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
+                    {
+                        response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
+                        geminiUnavailable = true
+                    });
                 }
                 catch (System.Net.Sockets.SocketException ex)
                 {
-                    Console.WriteLine($"[AiController] Gemini network error (no connection): {ex.Message}");
-                    // Remove the user message we just saved
-                    var lastUserMessage = _context.AIChatHistories
-                        .OrderByDescending(h => h.Timestamp)
-                        .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                    if (lastUserMessage != null)
+                    Console.WriteLine($"[AiController] FALLBACK: Gemini network error (no connection): {ex.Message}");
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
                     {
-                        _context.AIChatHistories.Remove(lastUserMessage);
-                        await _context.SaveChangesAsync();
-                    }
-                    return Ok(new 
-                    { 
                         response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                        geminiUnavailable = true 
+                        geminiUnavailable = true
                     });
                 }
                 catch (System.Threading.Tasks.TaskCanceledException ex)
                 {
-                    Console.WriteLine($"[AiController] Gemini timeout (no response): {ex.Message}");
-                    // Remove the user message we just saved
-                    var lastUserMessage = _context.AIChatHistories
-                        .OrderByDescending(h => h.Timestamp)
-                        .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                    if (lastUserMessage != null)
+                    Console.WriteLine($"[AiController] FALLBACK: Gemini timeout (no response after retries): {ex.Message}");
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
                     {
-                        _context.AIChatHistories.Remove(lastUserMessage);
-                        await _context.SaveChangesAsync();
-                    }
-                    return Ok(new 
-                    { 
                         response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                        geminiUnavailable = true 
+                        geminiUnavailable = true
                     });
                 }
                 catch (System.IO.IOException ex)
                 {
-                    Console.WriteLine($"[AiController] Gemini I/O error (no connection): {ex.Message}");
-                    // Remove the user message we just saved
-                    var lastUserMessage = _context.AIChatHistories
-                        .OrderByDescending(h => h.Timestamp)
-                        .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                    if (lastUserMessage != null)
+                    Console.WriteLine($"[AiController] FALLBACK: Gemini I/O error (no connection): {ex.Message}");
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
                     {
-                        _context.AIChatHistories.Remove(lastUserMessage);
-                        await _context.SaveChangesAsync();
-                    }
-                    return Ok(new 
-                    { 
                         response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                        geminiUnavailable = true 
+                        geminiUnavailable = true
                     });
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AiController] Gemini unexpected error: {ex.Message}");
-                    // Remove the user message we just saved
-                    var lastUserMessage = _context.AIChatHistories
-                        .OrderByDescending(h => h.Timestamp)
-                        .FirstOrDefault(h => h.UserId == userId && h.Role == "user");
-                    if (lastUserMessage != null)
+                    Console.WriteLine($"[AiController] FALLBACK: Gemini unexpected error: {ex.Message}");
+                    await RemoveLastUserMessage(userId);
+                    return Ok(new
                     {
-                        _context.AIChatHistories.Remove(lastUserMessage);
-                        await _context.SaveChangesAsync();
-                    }
-                    return Ok(new 
-                    { 
                         response = "Sorry, Gemini is not available right now. Tracey will try to help you while Gemini is away.",
-                        geminiUnavailable = true 
+                        geminiUnavailable = true
                     });
                 }
             }

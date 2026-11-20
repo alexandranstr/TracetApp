@@ -216,6 +216,7 @@ export default function CreatePinOverlay({
 
                 for (const asset of result.assets) {
                     try {
+                        // Generate compressed version
                         const manipulated: ImageResult = await manipulateAsync(
                             asset.uri,
                             [],
