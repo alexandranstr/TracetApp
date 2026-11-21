@@ -8,12 +8,12 @@ import {
     ScrollView,
     TextInput,
     Alert,
-    Image,
     ActivityIndicator,
     Modal,
     Linking,
     Clipboard,
     Switch,
+    Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {

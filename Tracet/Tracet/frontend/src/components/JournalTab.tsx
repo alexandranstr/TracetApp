@@ -5,7 +5,6 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Image,
     Dimensions,
     ActivityIndicator,
     Modal,
@@ -14,11 +13,11 @@ import {
     SafeAreaView,
     Switch,
     FlatList,
+    Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy';
 import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -352,13 +351,9 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
         try {
             const urls = JSON.parse(photoUrlsJson || '[]');
             if (!Array.isArray(urls)) return [];
-            return urls.map(url => {
-                if (url.includes('/Documents/')) {
-                    const filename = url.split('/Documents/').pop();
-                    return `${FileSystem.documentDirectory}${filename}`;
-                }
-                return url;
-            });
+            return urls
+                .map((url) => resolveImageUri(url))
+                .filter((url): url is string => url !== null);
         } catch {
             return [];
         }
@@ -717,11 +712,8 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
                         <Text style={styles.editLabel}>Photos</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.editPhotosScroll}>
                             {editPhotoUrls.map((uri, index) => {
-                                let displayUri = uri;
-                                if (uri.includes('/Documents/')) {
-                                    const filename = uri.split('/Documents/').pop();
-                                    displayUri = `${FileSystem.documentDirectory}${filename}`;
-                                }
+                                const displayUri = resolveImageUri(uri);
+                                if (!displayUri) return null;
                                 return (
                                 <View key={`${uri}-${index}`} style={styles.editPhotoContainer}>
                                     <Image source={{ uri: displayUri }} style={styles.editPhotoThumbnail} />

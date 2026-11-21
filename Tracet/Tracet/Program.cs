@@ -160,6 +160,6 @@ app.MapHub<ChatHub>("/chathub");
 
 app.MapGet("/", () => "Tracet API is running!");
 
-var url = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5001";
+var url = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://0.0.0.0:5001";
 Console.WriteLine($"[Tracet] Starting server on {url}");
 app.Run(url);

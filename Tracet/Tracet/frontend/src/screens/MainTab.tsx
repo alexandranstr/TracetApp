@@ -627,14 +627,19 @@ export default function MainTab({ navigation, route }: any) {
                             ref={mapRef}
                             style={styles.map}
                             provider={PROVIDER_DEFAULT}
-                            mapType="hybridFlyover"
+                            mapType={Platform.OS === 'android' ? 'hybrid' : 'hybridFlyover'}
                             userInterfaceStyle="dark"
                             showsUserLocation={true}
                             showsMyLocationButton={false}
                             showsCompass={false}
                             onPress={handleMapPress}
                             onRegionChangeComplete={handleRegionChangeComplete}
-                            initialRegion={{
+                            initialRegion={Platform.OS === 'android' ? {
+                                latitude: 20.0,
+                                longitude: 0.0,
+                                latitudeDelta: 60,
+                                longitudeDelta: 60,
+                            } : {
                                 latitude: 20.0,
                                 longitude: 0.0,
                                 latitudeDelta: 140,

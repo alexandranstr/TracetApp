@@ -5,14 +5,13 @@ import {
     Text,
     Modal,
     TouchableOpacity,
-    Image,
     FlatList,
     Dimensions,
     ScrollView,
     Alert,
+    Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useFonts, Caveat_700Bold } from '@expo-google-fonts/caveat';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
@@ -71,7 +70,9 @@ export default function PinDetailOverlay({
                 ? JSON.parse(pin.photoUrlsJson)
                 : pin.photoUrlsJson;
 
-            return raw.map((uri) => resolveImageUri(uri) || uri);
+            return raw
+                .map((uri) => resolveImageUri(uri))
+                .filter((uri): uri is string => uri !== null);
         } catch {
             return [];
         }

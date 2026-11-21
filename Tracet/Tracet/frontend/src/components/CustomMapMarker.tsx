@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, memo } from 'react';
-import { View, StyleSheet, Image, Text } from 'react-native';
+import { View, StyleSheet, Text, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
+import { resolveImageUri } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const PURPLE_ACCENT = '#AF52DE';
@@ -50,13 +50,8 @@ function CustomMapMarker({ pin, currentUserId, zoomLevel = 0.05 }: CustomMapMark
                 ? JSON.parse(pin.photoUrlsJson)
                 : pin.photoUrlsJson;
 
-            return parsed.map((uri) => {
-                if (uri.includes('/Documents/')) {
-                    const filename = uri.split('/Documents/').pop();
-                    return `${FileSystem.documentDirectory}${filename}`;
-                }
-                return uri;
-            });
+            const resolved = parsed.map((uri) => resolveImageUri(uri));
+            return resolved.filter((uri): uri is string => uri !== null);
         } catch (e) {
             console.log('Error parsing photoUrlsJson for pin ID:', pin.id, e);
             return [];

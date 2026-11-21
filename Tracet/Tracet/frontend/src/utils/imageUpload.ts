@@ -19,18 +19,25 @@ export function isLocalUri(uri: string): boolean {
 
 export function resolveImageUri(photoUrl?: string): string | null {
     if (!photoUrl) return null;
-    
+
     if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
         return photoUrl;
     }
-    
+
+    if (photoUrl.startsWith('data:image/')) {
+        return photoUrl;
+    }
+
     if (photoUrl.startsWith('uploads/') || photoUrl.startsWith('/uploads/')) {
         const cleanPath = photoUrl.startsWith('/') ? photoUrl : `/${photoUrl}`;
         return `${API_BASE_URL}${cleanPath}`;
     }
-    
-    const fileName = photoUrl.split('/').pop();
-    return `${FileSystem.documentDirectory}${fileName}`;
+
+    if (photoUrl.startsWith('profile_') && !photoUrl.includes('/')) {
+        return `${API_BASE_URL}/uploads/${photoUrl}`;
+    }
+
+    return null;
 }
 
 export async function validateImageSize(

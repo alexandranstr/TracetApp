@@ -11,10 +11,10 @@ import {
     ScrollView,
     KeyboardAvoidingView,
     Alert,
-    Image,
     Modal,
     FlatList,
-    Platform
+    Platform,
+    Image
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';

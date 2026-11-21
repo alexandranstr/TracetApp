@@ -6,7 +6,6 @@ import {
     TextInput,
     ScrollView,
     TouchableOpacity,
-    Image,
     SafeAreaView,
     KeyboardAvoidingView,
     StatusBar,
@@ -16,7 +15,8 @@ import {
     TouchableWithoutFeedback,
     Keyboard,
     Platform,
-    Alert
+    Alert,
+    Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';

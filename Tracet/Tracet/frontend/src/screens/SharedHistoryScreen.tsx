@@ -5,13 +5,13 @@ import {
     Text,
     FlatList,
     TouchableOpacity,
-    Image,
     SafeAreaView,
     ActivityIndicator,
     StatusBar,
     Modal,
     TouchableWithoutFeedback,
     Animated,
+    Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';

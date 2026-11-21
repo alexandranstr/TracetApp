@@ -6,8 +6,8 @@ import {
     TouchableOpacity,
     SafeAreaView,
     StatusBar,
-    Image,
-    Dimensions
+    Dimensions,
+    Image
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
@@ -71,7 +71,6 @@ export default function WelcomeScreen({ navigation }: any) {
                         <Image
                             source={require('../../assets/logo-dark.png')}
                             style={styles.logoImage}
-                            resizeMode="cover"
                         />
                     </View>
 

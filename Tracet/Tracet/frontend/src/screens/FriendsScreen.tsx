@@ -6,7 +6,6 @@ import {
     TextInput,
     FlatList,
     TouchableOpacity,
-    Image,
     SafeAreaView,
     ActivityIndicator,
     ScrollView,
@@ -14,6 +13,7 @@ import {
     Animated,
     Modal,
     TouchableWithoutFeedback,
+    Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';

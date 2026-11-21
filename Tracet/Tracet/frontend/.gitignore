@@ -40,3 +40,6 @@ google-services.json
 
 # Firebase config with sensitive credentials
 src/firebase.ts
+
+# App config with API keys
+app.json
