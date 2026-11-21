@@ -16,6 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useFonts, Caveat_700Bold } from '@expo-google-fonts/caveat';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
+import { resolveImageUri } from '../utils/imageUpload';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -70,13 +71,7 @@ export default function PinDetailOverlay({
                 ? JSON.parse(pin.photoUrlsJson)
                 : pin.photoUrlsJson;
 
-            return raw.map((uri) => {
-                if (uri.includes('/Documents/')) {
-                    const fileName = uri.split('/Documents/').pop();
-                    return `${FileSystem.documentDirectory}${fileName}`;
-                }
-                return uri;
-            });
+            return raw.map((uri) => resolveImageUri(uri) || uri);
         } catch {
             return [];
         }

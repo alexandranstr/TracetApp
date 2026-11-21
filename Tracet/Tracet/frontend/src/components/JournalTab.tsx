@@ -23,6 +23,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_BASE_URL } from '../config';
+import { processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -223,18 +224,6 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
         setIsSaving(false);
     };
 
-    const saveImagePermanently = async (uri: string): Promise<string> => {
-        try {
-            const filename = uri.split('/').pop() || `${Date.now()}.jpg`;
-            const destPath = `${FileSystem.documentDirectory}${filename}`;
-            await FileSystem.copyAsync({ from: uri, to: destPath });
-            return destPath;
-        } catch (err) {
-            console.log('Failed to save photo permanently:', err);
-            return uri;
-        }
-    };
-
     const handlePickPhotos = async () => {
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -251,20 +240,25 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
             });
 
             if (!result.canceled && result.assets?.length > 0) {
+                if (editPhotoUrls.length + result.assets.length > 10) {
+                    Alert.alert('Limit Reached', 'You can add up to 10 photos per pin.');
+                    return;
+                }
+
+                const user = getAuth().currentUser;
                 const processedUris: string[] = [];
 
                 for (const asset of result.assets) {
                     try {
-                        const manipulated = await manipulateAsync(
+                        const downloadUrl = await processAndUploadImage(
                             asset.uri,
-                            [],
-                            { compress: 0.8, format: SaveFormat.JPEG }
+                            user?.uid || '',
+                            'pins'
                         );
-                        const permanentUri = await saveImagePermanently(manipulated.uri);
-                        processedUris.push(permanentUri);
-                    } catch {
-                        const permanentUri = await saveImagePermanently(asset.uri);
-                        processedUris.push(permanentUri);
+                        processedUris.push(downloadUrl);
+                    } catch (err) {
+                        console.log('Upload error:', err);
+                        Alert.alert('Upload Failed', 'Could not upload photo. Please try again.');
                     }
                 }
 

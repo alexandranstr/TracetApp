@@ -31,6 +31,7 @@ import * as ImagePicker from 'expo-image-picker';
 import CountryPicker, { Country, CountryCode } from 'react-native-country-picker-modal';
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../config';
+import { processAndUploadImage } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#1C1C1E';
@@ -283,23 +284,37 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         if (!result.canceled && result.assets[0]?.uri) {
             const pickerUri = result.assets[0].uri;
-            const fileName = `profile_${Date.now()}.jpg`;
-            const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+            const currentUser = getAuth().currentUser;
+            if (!currentUser) return;
 
             try {
-                await FileSystem.copyAsync({
-                    from: pickerUri,
-                    to: permanentUri,
-                });
-                savePhotoUrl(fileName);
+                // Upload to Firebase Storage
+                const downloadUrl = await processAndUploadImage(
+                    pickerUri,
+                    currentUser.uid,
+                    'profiles'
+                );
+                savePhotoUrl(downloadUrl);
             } catch (err) {
-                console.log('Error saving image locally:', err);
-                Alert.alert('Error', 'Could not save photo locally.');
+                console.log('Error uploading profile photo to Firebase:', err);
+                // Fallback: save locally
+                try {
+                    const fileName = `profile_${Date.now()}.jpg`;
+                    const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+                    await FileSystem.copyAsync({
+                        from: pickerUri,
+                        to: permanentUri,
+                    });
+                    savePhotoUrl(fileName);
+                } catch (fallbackErr) {
+                    console.log('Error saving image locally:', fallbackErr);
+                    Alert.alert('Error', 'Could not save photo.');
+                }
             }
         }
     };
 
-    const savePhotoUrl = async (fileName: string) => {
+    const savePhotoUrl = async (photoUrl: string) => {
         try {
             const currentUser = getAuth().currentUser;
             if (!currentUser) return;
@@ -311,11 +326,11 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${idToken}`,
                 },
-                body: JSON.stringify({ photoUrl: fileName }),
+                body: JSON.stringify({ photoUrl }),
             });
 
             if (response.ok) {
-                setUserData((prev) => ({ ...prev, photoUrl: fileName }));
+                setUserData((prev) => ({ ...prev, photoUrl }));
                 Alert.alert('Success', 'Profile photo updated!');
             }
         } catch (err) {

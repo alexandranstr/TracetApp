@@ -18,19 +18,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
+import { resolveImageUri } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 
 const getResolvedImageUri = (photoUrl?: string) => {
-    if (!photoUrl) return null;
-    if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
-        return photoUrl;
-    }
-    if (photoUrl.startsWith('uploads/') || photoUrl.startsWith('/uploads/')) {
-        return `${API_BASE_URL}${photoUrl.startsWith('/') ? '' : '/'}${photoUrl}`;
-    }
-    const fileName = photoUrl.split('/').pop();
-    return `${FileSystem.documentDirectory}${fileName}`;
+    return resolveImageUri(photoUrl);
 };
 
 interface ConversationItem {

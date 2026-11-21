@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
+import { processAndUploadImage, isFirebaseUrl, resolveImageUri } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const PURPLE_ACCENT = '#AF52DE';
@@ -92,6 +93,7 @@ export default function CreatePinOverlay({
     const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
     const [photoUrls, setPhotoUrls] = useState<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
     const [availableTags, setAvailableTags] = useState<Tag[]>([]);
     const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
@@ -180,18 +182,6 @@ export default function CreatePinOverlay({
         }
     };
 
-    const saveImagePermanently = async (uri: string): Promise<string> => {
-        try {
-            const filename = uri.split('/').pop() || `${Date.now()}.jpg`;
-            const destPath = `${FileSystem.documentDirectory}${filename}`;
-            await FileSystem.copyAsync({ from: uri, to: destPath });
-            return destPath;
-        } catch (err) {
-            console.log('Failed to save photo permanently:', err);
-            return uri;
-        }
-    };
-
     const handlePickPhotos = async () => {
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -212,33 +202,46 @@ export default function CreatePinOverlay({
                 });
 
             if (!result.canceled && result.assets?.length > 0) {
+                // Check if we would exceed 10 photos
+                if (photoUrls.length + result.assets.length > 10) {
+                    Alert.alert('Limit Reached', 'You can add up to 10 photos per pin.');
+                    return;
+                }
+
+                setUploadingPhotos(true);
+                const user = getAuth().currentUser;
                 const processedUris: string[] = [];
 
-                for (const asset of result.assets) {
+                for (let i = 0; i < result.assets.length; i++) {
+                    const asset = result.assets[i];
                     try {
-                        // Generate compressed version
-                        const manipulated: ImageResult = await manipulateAsync(
+                        // Upload to Firebase Storage (strips EXIF, validates size)
+                        const downloadUrl = await processAndUploadImage(
                             asset.uri,
-                            [],
-                            {
-                                compress: 0.8,
-                                format: SaveFormat.JPEG,
+                            user?.uid || currentUserId,
+                            'pins',
+                            (progress) => {
+                                console.log(`[CreatePinOverlay] Uploading photo ${i + 1}/${result.assets.length}: ${progress}%`);
                             }
                         );
-
-                        const permanentUri = await saveImagePermanently(manipulated.uri);
-                        processedUris.push(permanentUri);
+                        processedUris.push(downloadUrl);
                     } catch (err) {
-                        console.log('Manipulator error:', err);
-                        const permanentUri = await saveImagePermanently(asset.uri);
-                        processedUris.push(permanentUri);
+                        console.log('Upload error:', err);
+                        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                        if (errorMsg.includes('too large')) {
+                            Alert.alert('Image Too Large', 'This image exceeds the 10MB limit.');
+                        } else {
+                            Alert.alert('Upload Failed', `Could not upload photo ${i + 1}. Please try again.`);
+                        }
                     }
                 }
 
                 setPhotoUrls((prev) => [...prev, ...processedUris]);
+                setUploadingPhotos(false);
             }
         } catch (error) {
             console.log('Error picking image:', error);
+            setUploadingPhotos(false);
             Alert.alert('Error', 'Could not load selected photo. Please try again.');
         }
     };
@@ -372,21 +375,33 @@ export default function CreatePinOverlay({
 
                     <Text style={styles.sectionTitle}>Photos</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
-                        {photoUrls.map((uri, index) => (
-                            <View key={`${uri}-${index}`} style={styles.photoContainer}>
-                                <Image source={{ uri }} style={styles.photoThumbnail} />
-                                <TouchableOpacity
-                                    style={styles.removePhotoButton}
-                                    onPress={() => handleRemovePhoto(index)}
-                                    activeOpacity={0.8}
-                                >
-                                    <Ionicons name="close-circle-sharp" size={22} color={PINK_ACCENT} />
-                                </TouchableOpacity>
-                            </View>
-                        ))}
-                        <TouchableOpacity style={styles.addPhotoButton} onPress={handlePickPhotos}>
-                            <Ionicons name="camera-outline" size={26} color={PINK_ACCENT} />
-                            <Text style={styles.addPhotoText}>Add Photo</Text>
+                        {photoUrls.map((uri, index) => {
+                            const resolvedUri = resolveImageUri(uri);
+                            return (
+                                <View key={`${uri}-${index}`} style={styles.photoContainer}>
+                                    <Image source={{ uri: resolvedUri || uri }} style={styles.photoThumbnail} />
+                                    <TouchableOpacity
+                                        style={styles.removePhotoButton}
+                                        onPress={() => handleRemovePhoto(index)}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Ionicons name="close-circle-sharp" size={22} color={PINK_ACCENT} />
+                                    </TouchableOpacity>
+                                </View>
+                            );
+                        })}
+                        <TouchableOpacity style={styles.addPhotoButton} onPress={handlePickPhotos} disabled={uploadingPhotos}>
+                            {uploadingPhotos ? (
+                                <View style={{ alignItems: 'center' }}>
+                                    <ActivityIndicator size="small" color={PINK_ACCENT} />
+                                    <Text style={styles.addPhotoText}>Uploading...</Text>
+                                </View>
+                            ) : (
+                                <>
+                                    <Ionicons name="camera-outline" size={26} color={PINK_ACCENT} />
+                                    <Text style={styles.addPhotoText}>Add Photo</Text>
+                                </>
+                            )}
                         </TouchableOpacity>
                     </ScrollView>
 

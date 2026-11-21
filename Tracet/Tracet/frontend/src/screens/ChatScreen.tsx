@@ -25,6 +25,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { getAuth } from '@react-native-firebase/auth';
 import { useFocusEffect } from '@react-navigation/native';
 import { API_BASE_URL } from '../config';
+import { processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
 import * as signalR from '@microsoft/signalr';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -56,15 +57,7 @@ const MESSAGE_COLORS = [
 ];
 
 const getResolvedImageUri = (photoUrl?: string) => {
-    if (!photoUrl) return null;
-    if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
-        return photoUrl;
-    }
-    if (photoUrl.startsWith('uploads/') || photoUrl.startsWith('/uploads/')) {
-        return `${API_BASE_URL}${photoUrl.startsWith('/') ? '' : '/'}${photoUrl}`;
-    }
-    const fileName = photoUrl.split('/').pop();
-    return `${FileSystem.documentDirectory}${fileName}`;
+    return resolveImageUri(photoUrl);
 };
 
 interface ChatMessage {
@@ -371,8 +364,6 @@ export default function ChatScreen({ navigation, route }: any) {
                 const asset = result.assets[0];
                 let finalUri = asset.uri;
 
-                // Try ImageManipulator first to convert to JPEG
-                // This works for most images and provides compression
                 try {
                     const manipResult = await ImageManipulator.manipulateAsync(
                         asset.uri,
@@ -386,8 +377,6 @@ export default function ChatScreen({ navigation, route }: any) {
                     console.log('Image manipulation failed, trying base64 fallback:', manipErr);
                 }
 
-                // Fallback: read the image as base64 and write to a new file
-                // This handles ph:// URIs and formats that ImageManipulator can't process
                 try {
                     const base64 = await FileSystem.readAsStringAsync(asset.uri, {
                         encoding: FileSystem.EncodingType.Base64,
@@ -416,43 +405,65 @@ export default function ChatScreen({ navigation, route }: any) {
         Keyboard.dismiss();
 
         try {
+            console.log('[ChatScreen] === Starting image send flow ===');
+            console.log('[ChatScreen] Selected image URI:', selectedImage.uri);
+            console.log('[ChatScreen] Conversation ID:', conversationId);
+
             let activeConvId = conversationId;
             const captionToSend = imageCaption.trim() || 'Photo';
             const token = await getAuthToken();
+            const user = getAuth().currentUser;
 
-            const uploadHeaders: Record<string, string> = { 'Accept': 'application/json' };
+            console.log('[ChatScreen] User ID:', user?.uid);
+            console.log('[ChatScreen] Auth token available:', !!token);
+
+            console.log('[ChatScreen] Calling processAndUploadImage...');
+            const downloadUrl = await processAndUploadImage(
+                selectedImage.uri,
+                user?.uid || '',
+                'chat'
+            );
+            console.log('[ChatScreen] ✓ Firebase upload complete. Download URL:', downloadUrl);
+
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             if (token) {
-                uploadHeaders['Authorization'] = `Bearer ${token}`;
+                headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const uploadTask = FileSystem.createUploadTask(
-                `${API_BASE_URL}/api/messages/send-image`,
-                selectedImage.uri,
-                {
-                    httpMethod: 'POST',
-                    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-                    fieldName: 'image',
-                    parameters: {
-                        conversationId: activeConvId!.toString(),
-                        text: captionToSend,
-                    },
-                    headers: uploadHeaders,
-                }
-            );
+            const bodyData = {
+                conversationId: activeConvId,
+                imageUrl: downloadUrl,
+                text: captionToSend
+            };
+            console.log('[ChatScreen] Sending to backend:', JSON.stringify(bodyData));
 
-            const result = await uploadTask.uploadAsync();
+            const res = await fetch(`${API_BASE_URL}/api/messages/send-image`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(bodyData)
+            });
 
-            if (result && result.status >= 200 && result.status < 300) {
-                const newMsg = JSON.parse(result.body);
+            console.log('[ChatScreen] Backend response status:', res.status);
+
+            if (res.ok) {
+                const newMsg = await res.json();
+                console.log('[ChatScreen] ✓ Message sent successfully:', newMsg.id);
                 setMessages((prev) => {
                     if (prev.find(m => m.id === newMsg.id)) return prev;
                     return [...prev, newMsg];
                 });
                 setSelectedImage(null);
                 setImageCaption('');
+            } else {
+                const errorText = await res.text();
+                console.log('[ChatScreen] ✗ Backend error:', errorText);
+                Alert.alert('Error', `Backend error: ${errorText}`);
             }
-        } catch (err) {
-            console.log('Error sending image:', err);
+        } catch (err: any) {
+            console.error('[ChatScreen] ✗ Error sending image:', err);
+            console.error('[ChatScreen] Error message:', err?.message);
+            console.error('[ChatScreen] Error stack:', err?.stack);
+            Alert.alert('Error', `Could not send image: ${err?.message || 'Unknown error'}`);
         } finally {
             setUploadingImage(false);
         }
@@ -708,7 +719,6 @@ export default function ChatScreen({ navigation, route }: any) {
                     </TouchableOpacity>
                 </View>
 
-                {/* Block status banner */}
                 {youBlockedPartner && (
                     <View style={styles.blockBanner}>
                         <Ionicons name="ban" size={18} color="#EF4444" />

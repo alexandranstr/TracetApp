@@ -382,10 +382,64 @@ public class MessagesController : ControllerBase
     }
 
     [HttpPost("send-image")]
-    public async Task<IActionResult> SendImageMessage([FromForm] int conversationId, [FromForm] IFormFile image, [FromForm] string? text = null)
+    public async Task<IActionResult> SendImageMessage()
     {
         var (senderId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
+
+        string? imageUrl = null;
+        int conversationId = 0;
+        string? text = null;
+
+        if (Request.HasFormContentType)
+        {
+            var form = await Request.ReadFormAsync();
+            
+            if (int.TryParse(form["conversationId"], out conversationId))
+            {
+                text = form["text"].ToString();
+                imageUrl = form.ContainsKey("imageUrl") ? form["imageUrl"].ToString() : null;
+                
+                if (string.IsNullOrEmpty(imageUrl))
+                {
+                    var image = form.Files["image"];
+                    if (image == null || image.Length == 0)
+                        return BadRequest(new { message = "Image is required." });
+
+                    var uploadsFolder = Path.Combine(_environment.ContentRootPath, "uploads", "chat");
+                    if (!Directory.Exists(uploadsFolder))
+                    {
+                        Directory.CreateDirectory(uploadsFolder);
+                    }
+
+                    var uniqueFileName = $"{Guid.NewGuid()}_{Path.GetFileName(image.FileName)}";
+                    var filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+                    using (var stream = new FileStream(filePath, FileMode.Create))
+                    {
+                        await image.CopyToAsync(stream);
+                    }
+
+                    imageUrl = $"/uploads/chat/{uniqueFileName}";
+                }
+            }
+        }
+        else
+        {
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<SendImageDto>(Request.Body);
+            if (body == null)
+                return BadRequest(new { message = "Invalid request body." });
+            
+            conversationId = body.ConversationId;
+            imageUrl = body.ImageUrl;
+            text = body.Text;
+        }
+
+        if (string.IsNullOrEmpty(imageUrl))
+            return BadRequest(new { message = "Image URL is required." });
+
+        if (conversationId == 0)
+            return BadRequest(new { message = "Conversation ID is required." });
 
         var conversation = await _context.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId);
         if (conversation == null) return NotFound(new { message = "Conversation not found." });
@@ -398,25 +452,6 @@ public class MessagesController : ControllerBase
         var isBlocked = await _context.BlockedUsers.AnyAsync(b => b.UserId == receiverId && b.BlockedUserId == senderId);
         if (isBlocked)
             return BadRequest(new { message = "You cannot send messages to this user." });
-
-        if (image == null || image.Length == 0)
-            return BadRequest(new { message = "Image is required." });
-
-        var uploadsFolder = Path.Combine(_environment.ContentRootPath, "uploads", "chat");
-        if (!Directory.Exists(uploadsFolder))
-        {
-            Directory.CreateDirectory(uploadsFolder);
-        }
-
-        var uniqueFileName = $"{Guid.NewGuid()}_{Path.GetFileName(image.FileName)}";
-        var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-        using (var stream = new FileStream(filePath, FileMode.Create))
-        {
-            await image.CopyToAsync(stream);
-        }
-
-        var imageUrl = $"/uploads/chat/{uniqueFileName}";
 
         var message = new Message
         {
@@ -450,6 +485,18 @@ public class MessagesController : ControllerBase
         await _hubContext.Clients.Groups(new[] { senderId, receiverId! }).SendAsync("ReceiveMessage", messagePayload);
 
         return Ok(messagePayload);
+    }
+
+    public class SendImageDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("conversationId")]
+        public int ConversationId { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("imageUrl")]
+        public string? ImageUrl { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("text")]
+        public string? Text { get; set; }
     }
     
     [HttpPost("get-or-create")]

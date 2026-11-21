@@ -37,3 +37,6 @@ GoogleService-Info.plist
 google-services.json
 **/ios/GoogleService-Info.plist
 **/android/app/google-services.json
+
+# Firebase config with sensitive credentials
+src/firebase.ts

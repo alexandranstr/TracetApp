@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
+import { resolveImageUri } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 
@@ -59,15 +60,7 @@ function AnimatedCard({ children, index, delay = 60 }: { children: React.ReactNo
 }
 
 const getResolvedImageUri = (photoUrl?: string) => {
-    if (!photoUrl) return null;
-    if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
-        return photoUrl;
-    }
-    if (photoUrl.startsWith('uploads/') || photoUrl.startsWith('/uploads/')) {
-        return `${API_BASE_URL}${photoUrl.startsWith('/') ? '' : '/'}${photoUrl}`;
-    }
-    const fileName = photoUrl.split('/').pop();
-    return `${FileSystem.documentDirectory}${fileName}`;
+    return resolveImageUri(photoUrl);
 };
 
 interface UserProfile {
