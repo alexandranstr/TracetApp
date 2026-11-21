@@ -22,6 +22,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../config';
+import { processAndUploadImage } from '../utils/imageUpload';
 
 const { width, height } = Dimensions.get('window');
 
@@ -96,22 +97,33 @@ export default function OnboardingSetupScreen({ navigation }: any) {
 
             let savedFileName: string | null = null;
 
-            if (photoUri && photoUri.startsWith('file://')) {
+            if (photoUri) {
                 try {
-                    const fileName = `profile_${Date.now()}.jpg`;
-                    const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
-
-                    await FileSystem.copyAsync({
-                        from: photoUri,
-                        to: permanentUri,
-                    });
-
-                    savedFileName = fileName;
+                    // Upload profile photo to Firebase Storage
+                    savedFileName = await processAndUploadImage(
+                        photoUri,
+                        currentUser.uid,
+                        'profiles'
+                    );
                 } catch (err) {
-                    console.log('Error saving photo locally in onboarding:', err);
+                    console.log('Error uploading profile photo to Firebase:', err);
+                    // Fallback: save locally if upload fails
+                    if (photoUri.startsWith('file://')) {
+                        try {
+                            const fileName = `profile_${Date.now()}.jpg`;
+                            const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+                            await FileSystem.copyAsync({
+                                from: photoUri,
+                                to: permanentUri,
+                            });
+                            savedFileName = fileName;
+                        } catch (fallbackErr) {
+                            console.log('Error saving photo locally in onboarding:', fallbackErr);
+                        }
+                    } else {
+                        savedFileName = photoUri;
+                    }
                 }
-            } else if (photoUri) {
-                savedFileName = photoUri;
             }
 
             const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {

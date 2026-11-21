@@ -208,7 +208,7 @@ public class AuthController : ControllerBase
             // Delete all pins for this user
             var pins = await _dbContext.Pins.Where(p => p.UserId == uid).ToListAsync();
             
-            // Delete pin photo files from disk
+            // Delete pin photo files from disk and Firebase Storage
             foreach (var pin in pins)
             {
                 if (!string.IsNullOrEmpty(pin.PhotoUrlsJson))
@@ -220,14 +220,29 @@ public class AuthController : ControllerBase
                         {
                             foreach (var photoUrl in photoUrls)
                             {
-                                if (!string.IsNullOrEmpty(photoUrl) && photoUrl.StartsWith("/uploads/"))
+                                if (string.IsNullOrEmpty(photoUrl)) continue;
+                                
+                                // Delete from disk if it's a local file
+                                if (photoUrl.StartsWith("/uploads/"))
                                 {
                                     var fileName = System.IO.Path.GetFileName(photoUrl);
                                     var directoryPath = System.IO.Path.Combine(_environment.ContentRootPath, "uploads", photoUrl.Replace("/uploads/", "").Replace('/', System.IO.Path.DirectorySeparatorChar));
                                     if (System.IO.File.Exists(directoryPath))
                                     {
                                         System.IO.File.Delete(directoryPath);
-                                        Console.WriteLine($"[AuthController] Deleted pin photo: {directoryPath}");
+                                        Console.WriteLine($"[AuthController] Deleted pin photo from disk: {directoryPath}");
+                                    }
+                                }
+                                // Delete from Firebase Storage if it's a Firebase URL
+                                else if (photoUrl.StartsWith("http://") || photoUrl.StartsWith("https://"))
+                                {
+                                    try
+                                    {
+                                        await DeleteFromFirebaseStorageAsync(photoUrl);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[AuthController] Error deleting from Firebase Storage: {ex.Message}");
                                     }
                                 }
                             }
@@ -245,20 +260,33 @@ public class AuthController : ControllerBase
             // Delete all messages sent by this user (including image messages)
             var messages = await _dbContext.Messages.Where(m => m.SenderId == uid).ToListAsync();
             
-            // Delete chat image files from disk
+            // Delete chat image files from disk and Firebase Storage
             foreach (var msg in messages)
             {
                 if (!string.IsNullOrEmpty(msg.ImageUrl))
                 {
                     try
                     {
+                        // Delete from disk if it's a local file
                         if (msg.ImageUrl.StartsWith("/uploads/"))
                         {
                             var filePath = System.IO.Path.Combine(_environment.ContentRootPath, msg.ImageUrl.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
                             if (System.IO.File.Exists(filePath))
                             {
                                 System.IO.File.Delete(filePath);
-                                Console.WriteLine($"[AuthController] Deleted chat image: {filePath}");
+                                Console.WriteLine($"[AuthController] Deleted chat image from disk: {filePath}");
+                            }
+                        }
+                        // Delete from Firebase Storage if it's a Firebase URL
+                        else if (msg.ImageUrl.StartsWith("http://") || msg.ImageUrl.StartsWith("https://"))
+                        {
+                            try
+                            {
+                                await DeleteFromFirebaseStorageAsync(msg.ImageUrl);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[AuthController] Error deleting from Firebase Storage: {ex.Message}");
                             }
                         }
                     }
@@ -319,5 +347,53 @@ public class AuthController : ControllerBase
             return NotFound(new { message = "User not found." });
 
         return Ok(new { email = user.Email });
+    }
+
+    /// <summary>
+    /// Delete a file from Firebase Storage using the REST API.
+    /// Extracts the path from the Firebase Storage download URL and sends DELETE request.
+    /// </summary>
+    private async Task DeleteFromFirebaseStorageAsync(string downloadUrl)
+    {
+        try
+        {
+            // Parse the path from the Firebase Storage URL
+            // URL format: https://firebasestorage.googleapis.com/v/b/<bucket>/o/<encoded-path>?...
+            var uri = new Uri(downloadUrl);
+            var pathParts = uri.AbsolutePath.Split('/');
+            var oIndex = Array.IndexOf(pathParts, "o");
+            if (oIndex < 0 || oIndex >= pathParts.Length - 1)
+            {
+                Console.WriteLine($"[AuthController] Could not extract path from Firebase URL: {downloadUrl}");
+                return;
+            }
+
+            var encodedPath = string.Join("/", pathParts.Skip(oIndex + 1));
+            var decodedPath = System.Net.WebUtility.UrlDecode(encodedPath);
+            
+            Console.WriteLine($"[AuthController] Deleting from Firebase Storage: {decodedPath}");
+
+            // Use Firebase Storage REST API to delete the object
+            var bucketIndex = Array.IndexOf(pathParts, "b");
+            if (bucketIndex < 0 || bucketIndex >= pathParts.Length - 1) return;
+            
+            var bucket = pathParts[bucketIndex + 1];
+            var deleteUrl = $"https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{System.Net.WebUtility.UrlEncode(decodedPath)}";
+
+            using (var client = new System.Net.Http.HttpClient())
+            {
+                var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Delete, deleteUrl);
+                var response = await client.SendAsync(request);
+                
+                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    Console.WriteLine($"[AuthController] Deleted from Firebase Storage: {decodedPath}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AuthController] Could not delete from Firebase Storage: {ex.Message}");
+        }
     }
 }
