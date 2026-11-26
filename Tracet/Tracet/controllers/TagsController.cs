@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Tracet.data;
-using Tracet.models;
+using Tracet.services;
 
 namespace Tracet.controllers
 {
@@ -64,58 +64,68 @@ namespace Tracet.controllers
             var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
             if (errorResult != null) return errorResult;
 
+            var tagNames = await _context.Tags
+                .ToDictionaryAsync(tag => tag.Id, tag => tag.Name);
+
             var userPins = await _context.Pins
                 .Where(p => p.UserId == currentUserId)
                 .ToListAsync();
 
-            var userTagIds = new HashSet<int>();
+            var userTagCounts = RecommendationScorer.CountTagOccurrences(
+                userPins.Select(pin => pin.TagsVectorJson), tagNames.Keys);
             var visitedLocationIds = new HashSet<int>();
             foreach (var pin in userPins)
             {
                 visitedLocationIds.Add(pin.LocationId);
-                if (!string.IsNullOrEmpty(pin.TagsVectorJson))
-                {
-                    try
-                    {
-                        var tagIds = System.Text.Json.JsonSerializer.Deserialize<List<int>>(pin.TagsVectorJson);
-                        if (tagIds != null)
-                        {
-                            foreach (var id in tagIds)
-                            {
-                                userTagIds.Add(id);
-                            }
-                        }
-                    }
-                    catch { }
-                }
             }
 
-            System.Console.WriteLine($"[RECOMMENDATIONS] User: {currentUserId}, Pins: {userPins.Count}, UserTags: {string.Join(",", userTagIds)}, Visited: {string.Join(",", visitedLocationIds)}");
+            System.Console.WriteLine($"[RECOMMENDATIONS] User: {currentUserId}, Pins: {userPins.Count}, UserTags: {string.Join(",", userTagCounts.Keys)}, Visited: {string.Join(",", visitedLocationIds)}");
 
             var allLocations = await _context.Locations
                 .Where(l => !visitedLocationIds.Contains(l.Id))
                 .Include(l => l.LocationTags)
-                    .ThenInclude(lt => lt.Tag)
                 .ToListAsync();
 
             System.Console.WriteLine($"[RECOMMENDATIONS] Unvisited locations: {allLocations.Count}");
 
+            var candidateLocationIds = allLocations.Select(location => location.Id).ToList();
+            var locationPins = await _context.Pins
+                .Where(pin => candidateLocationIds.Contains(pin.LocationId))
+                .Select(pin => new { pin.LocationId, pin.TagsVectorJson })
+                .ToListAsync();
+            var locationTagCounts = locationPins
+                .GroupBy(pin => pin.LocationId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => RecommendationScorer.CountTagOccurrences(
+                        group.Select(pin => pin.TagsVectorJson), tagNames.Keys));
+
             var scored = allLocations.Select(l =>
             {
-                var tags = l.LocationTags.Select(lt => new
-                {
-                    lt.TagId,
-                    lt.TagCount,
-                    lt.Tag.Name
-                }).ToList();
+                var locationCounts = locationTagCounts.TryGetValue(l.Id, out var pinTagCounts)
+                    ? pinTagCounts
+                    : l.LocationTags
+                        .Where(locationTag => locationTag.TagCount > 0 && tagNames.ContainsKey(locationTag.TagId))
+                        .ToDictionary(locationTag => locationTag.TagId, locationTag => locationTag.TagCount);
+                var tags = locationCounts
+                    .Where(tag => tag.Value > 0 && tagNames.ContainsKey(tag.Key))
+                    .Select(tag => new
+                    {
+                        TagId = tag.Key,
+                        TagCount = tag.Value,
+                        Name = tagNames[tag.Key]
+                    })
+                    .OrderByDescending(tag => tag.TagCount)
+                    .ThenBy(tag => tag.TagId)
+                    .ToList();
 
-                var totalTagWeight = tags.Sum(t => t.TagCount);
-                var matchedWeight = tags
-                    .Where(t => userTagIds.Contains(t.TagId))
-                    .Sum(t => t.TagCount);
-                var score = totalTagWeight > 0 ? Math.Round((matchedWeight / (double)totalTagWeight) * 100) : 0;
-                var matchedTags = tags.Where(t => userTagIds.Contains(t.TagId)).Select(t => t.Name).ToList();
-                var topTag = tags.OrderByDescending(t => t.TagCount).FirstOrDefault();
+                var score = Math.Round(
+                    RecommendationScorer.CalculateCosineMatchScore(userTagCounts, locationCounts), 1);
+                var matchedTags = tags
+                    .Where(tag => userTagCounts.ContainsKey(tag.TagId))
+                    .Select(tag => tag.Name)
+                    .ToList();
+                var topTag = tags.FirstOrDefault();
 
                 var fullLocation = new List<string>();
                 if (!string.IsNullOrEmpty(l.PlaceName)) fullLocation.Add(l.PlaceName);
@@ -123,7 +133,13 @@ namespace Tracet.controllers
                 if (!string.IsNullOrEmpty(l.CountryName)) fullLocation.Add(l.CountryName);
                 var locationText = fullLocation.Count > 0 ? string.Join(", ", fullLocation) : "A saved location";
 
-                var recommendationDesc = score > 70 ? "You'd love this place, it perfectly matches your other trips!" : (score > 40 ? "You'd probably like this, it matches with the rest of your trips." : "This might interest you, it shares some tags with your saved places.");
+                var recommendationDesc = score > 70
+                    ? "This place is a strong match for the tags you use most."
+                    : score > 40
+                        ? "This place shares several of your most-used tags."
+                        : score > 0
+                            ? "This place has some tag overlap with your saved places."
+                            : "Explore this place as a new suggestion.";
 
                 return new
                 {
@@ -135,7 +151,7 @@ namespace Tracet.controllers
                     description = recommendationDesc,
                     matchScore = score,
                     matchedTags,
-                    tagIds = tags.Select(t => t.TagId).ToList()
+                    tagIds = tags.Select(tag => tag.TagId).ToList()
                 };
             }).OrderByDescending(l => l.matchScore)
               .ThenByDescending(l => l.tagIds.Count)
