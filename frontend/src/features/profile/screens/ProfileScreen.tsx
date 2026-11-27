@@ -16,44 +16,34 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Photo from '../../../shared/components/Photo';
-import {
-    getAuth,
-    signOut,
-    updatePassword,
-    deleteUser,
-    PhoneAuthProvider,
-    signInWithCredential,
-    signInWithPhoneNumber,
-    linkWithCredential 
-} from '@react-native-firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import CountryPicker, { Country, CountryCode } from 'react-native-country-picker-modal';
-import { authApi } from '../../auth/api';
-import { imagePickerOptions, processAndUploadImage, resolveImageUri } from '../../../shared/imageUpload';
+import { PhoneConfirmation, useProfile } from '../useProfile';
+import { imagePickerOptions, resolveImageUri } from '../../../shared/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#1C1C1E';
 const CARD_BG = '#2C2C2E';
 
-interface ProfileSettingsProps {
+interface ProfileScreenProps {
     currentUserId: string | null;
     navigation: any;
 }
 
-export default function ProfileSettings({ currentUserId, navigation }: ProfileSettingsProps) {
-    const [loading, setLoading] = useState(true);
+export default function ProfileScreen({ currentUserId, navigation }: ProfileScreenProps) {
+    const {
+        profile: userData,
+        loading,
+        updateNames,
+        changePhoto,
+        sendPhoneCode,
+        verifyPhone,
+        setTwoFactor,
+        changePassword,
+        signOut,
+        deleteAccount,
+    } = useProfile(currentUserId);
     const [savingPhone, setSavingPhone] = useState(false);
-
-    const [userData, setUserData] = useState<{
-        displayName?: string;
-        username?: string;
-        email?: string;
-        photoUrl?: string;
-        phoneNumber?: string;
-        isTwoFactorEnabled?: boolean;
-        isPhoneVerified?: boolean;
-    }>({});
 
     const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
     const [countryCode, setCountryCode] = useState<CountryCode>('RO');
@@ -63,7 +53,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
     const [isVerificationModalVisible, setIsVerificationModalVisible] = useState(false);
     const [verificationCode, setVerificationCode] = useState('');
-    const [confirmResult, setConfirmResult] = useState<any>(null);
+    const [confirmResult, setConfirmResult] = useState<PhoneConfirmation | null>(null);
     const [verifyingCode, setVerifyingCode] = useState(false);
 
     const [isEditProfileVisible, setIsEditProfileVisible] = useState(false);
@@ -78,34 +68,6 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [updatingPassword, setUpdatingPassword] = useState(false);
     const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
-
-    useEffect(() => {
-        const fetchUserProfile = async () => {
-            try {
-                const currentUser = getAuth().currentUser;
-                if (!currentUser) return;
-
-                const data = await authApi.getProfile();
-                setUserData({
-                    displayName: data.displayName || currentUser.displayName || 'Traveler',
-                    username: data.username || '',
-                    email: currentUser.email || data.email || 'No email',
-                    photoUrl: data.photoUrl || currentUser.photoURL || '',
-                    phoneNumber: data.phoneNumber || '',
-                    isTwoFactorEnabled: data.isTwoFactorEnabled,
-                    isPhoneVerified: data.isPhoneVerified,
-                });
-                setEditDisplayName(data.displayName || currentUser.displayName || '');
-                setEditUsername(data.username || '');
-            } catch (err) {
-                console.log('Error fetching profile:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchUserProfile();
-    }, [currentUserId]);
 
     const handleOpenPhoneModal = () => {
         const existingNumber = userData.phoneNumber || '';
@@ -142,8 +104,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         try {
             setSavingPhone(true);
-            getAuth().settings.appVerificationDisabledForTesting = true;
-            const confirmation = await signInWithPhoneNumber(getAuth(), formattedPhone);
+            const confirmation = await sendPhoneCode(formattedPhone);
 
             setConfirmResult(confirmation);
             setPendingPhoneNumber(formattedPhone);
@@ -164,34 +125,8 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         try {
             setVerifyingCode(true);
-            const credential = PhoneAuthProvider.credential(
-                confirmResult.verificationId,
-                verificationCode
-            );
-
-            const currentUser = getAuth().currentUser;
-            if (!currentUser) throw new Error('No user authenticated.');
-
-            try {
-                await linkWithCredential(currentUser, credential);
-            } catch (linkError: any) {
-                if (linkError.code !== 'auth/provider-already-linked') {
-                    throw linkError;
-                }
-            }
-
-            const phoneToSend = pendingPhoneNumber;
-            if (!phoneToSend) {
-                throw new Error('Phone number is missing.');
-            }
-
-            await authApi.updateProfile({ phoneNumber: phoneToSend });
-
-            setUserData(prev => ({
-                ...prev,
-                phoneNumber: phoneToSend,
-                isPhoneVerified: true
-            }));
+            if (!confirmResult || !pendingPhoneNumber) throw new Error('Phone number is missing.');
+            await verifyPhone(confirmResult, verificationCode, pendingPhoneNumber);
             setIsVerificationModalVisible(false);
             setVerificationCode('');
             Alert.alert('Success', 'Phone number verified and saved successfully!');
@@ -212,8 +147,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
         }
 
         try {
-            const data = await authApi.setTwoFactor(value);
-            setUserData(prev => ({ ...prev, isTwoFactorEnabled: data.isTwoFactorEnabled }));
+            await setTwoFactor(value);
             Alert.alert('Success', `2FA has been ${value ? 'enabled' : 'disabled'}.`);
         } catch (err) {
             Alert.alert('Error', err instanceof Error ? err.message : 'Could not update 2FA setting.');
@@ -232,30 +166,12 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
         );
 
         if (!result.canceled && result.assets[0]?.uri) {
-            const pickerUri = result.assets[0].uri;
-            const currentUser = getAuth().currentUser;
-            if (!currentUser) return;
-
             try {
-                const downloadUrl = await processAndUploadImage(
-                    pickerUri,
-                    currentUser.uid,
-                    'profiles'
-                );
-                savePhotoUrl(downloadUrl);
+                await changePhoto(result.assets[0].uri);
+                Alert.alert('Success', 'Profile photo updated!');
             } catch (err) {
                 Alert.alert('Upload Failed', err instanceof Error ? err.message : 'Could not upload photo.');
             }
-        }
-    };
-
-    const savePhotoUrl = async (photoUrl: string) => {
-        try {
-            await authApi.updateProfile({ photoUrl });
-            setUserData((prev) => ({ ...prev, photoUrl }));
-            Alert.alert('Success', 'Profile photo updated!');
-        } catch (err) {
-            Alert.alert('Error', 'Failed to update profile photo.');
         }
     };
 
@@ -267,15 +183,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         try {
             setUpdatingProfile(true);
-            const data = await authApi.updateProfile({
-                displayName: editDisplayName.trim(),
-                username: editUsername.trim(),
-            });
-            setUserData((prev) => ({
-                ...prev,
-                displayName: data.displayName,
-                username: data.username,
-            }));
+            await updateNames(editDisplayName.trim(), editUsername.trim());
             setIsEditProfileVisible(false);
             Alert.alert('Success', 'Profile updated successfully!');
         } catch (error) {
@@ -333,14 +241,11 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
 
         try {
             setUpdatingPassword(true);
-            const user = getAuth().currentUser;
-            if (user) {
-                await updatePassword(user, newPassword);
-                Alert.alert('Success', 'Password updated successfully!');
-                setIsPasswordModalVisible(false);
-                setNewPassword('');
-                setConfirmPassword('');
-            }
+            await changePassword(newPassword);
+            Alert.alert('Success', 'Password updated successfully!');
+            setIsPasswordModalVisible(false);
+            setNewPassword('');
+            setConfirmPassword('');
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Failed to update password.');
         } finally {
@@ -356,10 +261,8 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                 style: 'destructive',
                 onPress: async () => {
                     try {
-                        await AsyncStorage.removeItem('userProfile');
-                        await signOut(getAuth());
-                    } catch (err) {
-                        console.log('Error signing out:', err);
+                        await signOut();
+                    } catch {
                         Alert.alert('Error', 'Failed to sign out. Please try again.');
                     }
                 },
@@ -378,12 +281,7 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            const currentUser = getAuth().currentUser;
-                            if (!currentUser) return;
-
-                            await authApi.deleteAccount();
-                            await deleteUser(currentUser);
-                            await AsyncStorage.clear();
+                            await deleteAccount();
 
                             navigation.reset({
                                 index: 0,
@@ -430,7 +328,11 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
                     <Text style={styles.displayName}>{userData.displayName}</Text>
                     <Text style={styles.username}>@{userData.username || 'username'}</Text>
 
-                    <TouchableOpacity style={styles.editProfileBtn} onPress={() => setIsEditProfileVisible(true)}>
+                    <TouchableOpacity style={styles.editProfileBtn} onPress={() => {
+                        setEditDisplayName(userData.displayName);
+                        setEditUsername(userData.username);
+                        setIsEditProfileVisible(true);
+                    }}>
                         <Text style={styles.editProfileBtnText}>Edit Profile</Text>
                     </TouchableOpacity>
                 </View>

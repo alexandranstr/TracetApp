@@ -13,8 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Photo from '../../../shared/components/Photo';
 import { useFonts, Caveat_700Bold } from '@expo-google-fonts/caveat';
-import { pinsApi, resolvedPhotoUris } from '../api';
+import { resolvedPhotoUris } from '../photos';
 import { Pin } from '../types';
+import { usePinActions } from '../usePinActions';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -42,6 +43,7 @@ export default function PinDetailOverlay({
     const [fontsLoaded] = useFonts({
         Caveat_700Bold,
     });
+    const { remove, toggleVisibility } = usePinActions();
 
     const [activeImageIndex, setActiveImageIndex] = useState(0);
     const [isLiked, setIsLiked] = useState(false);
@@ -60,7 +62,7 @@ export default function PinDetailOverlay({
                 style: 'destructive',
                 onPress: async () => {
                     try {
-                        await pinsApi.remove(pin.id);
+                        await remove(pin.id);
                         onPinDeleted(pin.id);
                         onClose();
                     } catch (e) {
@@ -73,8 +75,7 @@ export default function PinDetailOverlay({
 
     const handleToggleVisibility = async () => {
         try {
-            const updated = await pinsApi.toggleVisibility(pin.id);
-            onPinUpdated({ ...pin, isPrivate: updated.isPrivate });
+            onPinUpdated(await toggleVisibility(pin));
         } catch (e) {
             Alert.alert('Error', (e as Error).message);
         }

@@ -50,7 +50,7 @@ TracetApp/
     └── src/
         ├── index.ts             app entry
         ├── api/                 shared HTTP client (server address, token, timeouts, errors)
-        ├── navigation/          first screen: welcome, onboarding or map
+        ├── navigation/          screen list, first screen and the bottom tab bar
         ├── shared/              Photo component, image upload
         └── features/
             ├── auth/            sign-in, sign-up, onboarding
@@ -63,7 +63,7 @@ TracetApp/
             └── profile/         settings and profile
 ```
 
-Inside a feature: `api.ts` (one line per endpoint), `types.ts` (response shapes), `use*.ts` (state for a screen), `screens/` and `components/` (what the user sees).
+Inside a feature: `api.ts` (one line per endpoint), `types.ts` (response shapes), `use*.ts` hooks (data, loading and actions), `screens/` and `components/` (what the user sees). Screens and components only talk to hooks; they never import `api.ts`.
 
 ---
 

@@ -16,15 +16,15 @@ import {
     ActivityIndicator
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { getAuth, signInWithCredential, GoogleAuthProvider, signInWithEmailAndPassword, signInWithPhoneNumber, PhoneAuthProvider } from '@react-native-firebase/auth';
-import { ApiError } from '../../../api/client';
-import { authApi } from '../api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { getAuth, signInWithCredential, signInWithPhoneNumber, PhoneAuthProvider } from '@react-native-firebase/auth';
+import { UserProfile } from '../../profile/types';
+import { useAuth } from '../useAuth';
 
 const { width, height } = Dimensions.get('window');
 
 export default function SignInScreen({ navigation }: any) {
+    const { signIn, signInWithGoogle, finishSignIn } = useAuth();
     const [loginIdentifier, setLoginIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
@@ -42,12 +42,8 @@ export default function SignInScreen({ navigation }: any) {
         });
     }, []);
 
-    const completeNavigation = async (dbUser: any) => {
-        if (dbUser?.username) {
-            await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
-        } else {
-            navigation.navigate('OnboardingSetup');
-        }
+    const completeNavigation = async (profile: UserProfile) => {
+        if (!(await finishSignIn(profile))) navigation.navigate('OnboardingSetup');
     };
 
     const handleProcessPostSignIn = async (dbUser: any) => {
@@ -99,62 +95,20 @@ export default function SignInScreen({ navigation }: any) {
         setIsLoading(true);
 
         try {
-            let targetEmail = identifier;
-            const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier);
-
-            if (!isEmail) {
-                const cleanUsername = identifier.replace(/^@/, '');
-                try {
-                    targetEmail = (await authApi.resolveEmail(cleanUsername)).email;
-                } catch (error) {
-                    throw new Error(error instanceof ApiError && error.status === 404 ? 'USERNAME_NOT_FOUND' : 'SERVER_ERROR');
-                }
-            }
-
-            const userCredential = await signInWithEmailAndPassword(getAuth(), targetEmail, password);
-            const dbUser = await authApi.sync();
-
-            const resolvedUserId = dbUser?.id || userCredential.user.uid;
-            await AsyncStorage.setItem('userId', resolvedUserId);
-
+            const dbUser = await signIn(identifier, password);
             setIsLoading(false);
             await handleProcessPostSignIn(dbUser);
         } catch (error: any) {
             setIsLoading(false);
-            console.error('Sign-In Error:', error);
             Alert.alert('Sign-In Failed', error.message || 'Invalid credentials.');
         }
     };
 
     const handleGoogleSignIn = async () => {
         try {
-            await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-            const signInResult = await GoogleSignin.signIn();
-
-            if (!signInResult || (signInResult as any).type === 'cancelled') {
-                return;
-            }
-
-            const idToken = signInResult.data?.idToken || (signInResult as any).idToken;
-            if (!idToken) return;
-
-            const googleCredential = GoogleAuthProvider.credential(idToken);
-            const userCredential = await signInWithCredential(getAuth(), googleCredential);
-
-            const dbUser = await authApi.sync();
-
-            const resolvedUserId = dbUser?.id || userCredential.user.uid;
-            await AsyncStorage.setItem('userId', resolvedUserId);
-
-            await handleProcessPostSignIn(dbUser);
+            const profile = await signInWithGoogle();
+            if (profile) await handleProcessPostSignIn(profile);
         } catch (error: any) {
-            if (
-                error.code === statusCodes.SIGN_IN_CANCELLED ||
-                error.code === 'ASYNC_OP_IN_PROGRESS' ||
-                error.code === statusCodes.IN_PROGRESS
-            ) {
-                return;
-            }
             Alert.alert('Error', error.message || 'Google Sign-In failed');
         }
     };

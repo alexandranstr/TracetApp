@@ -19,9 +19,8 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { getAuth } from '@react-native-firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Photo from '../../../shared/components/Photo';
-import { authApi } from '../api';
+import { useAuth } from '../useAuth';
 import { imagePickerOptions, processAndUploadImage } from '../../../shared/imageUpload';
 
 const { width, height } = Dimensions.get('window');
@@ -42,6 +41,7 @@ const COUNTRIES = [
 ];
 
 export default function OnboardingSetupScreen({ navigation }: any) {
+    const { completeProfile } = useAuth();
     const [fullName, setFullName] = useState('');
     const [username, setUsername] = useState('');
     const [homeCountry, setHomeCountry] = useState('');
@@ -94,16 +94,12 @@ export default function OnboardingSetupScreen({ navigation }: any) {
                 ? await processAndUploadImage(photoUri, currentUser.uid, 'profiles')
                 : null;
 
-            const data = await authApi.updateProfile({
+            await completeProfile({
                 displayName: fullName.trim(),
                 username: cleanUsername,
                 homeCountry: homeCountry,
                 photoUrl,
             });
-
-            const resolvedUserId = data.id || currentUser.uid;
-            await AsyncStorage.setItem('userId', resolvedUserId);
-            await AsyncStorage.setItem('userProfile', JSON.stringify(data));
 
             navigation.navigate('MainTab');
         } catch (error: any) {

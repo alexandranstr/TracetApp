@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Modal,
     View,
@@ -19,8 +19,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getAuth } from '@react-native-firebase/auth';
-import { pinsApi } from '../api';
-import { CreatePinRequest, Pin, Tag } from '../types';
+import { CreatePinRequest, Pin } from '../types';
+import { usePinActions } from '../usePinActions';
+import { usePinOptions } from '../usePinOptions';
 import { imagePickerOptions, processAndUploadImage, isFirebaseUrl, resolveImageUri } from '../../../shared/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
@@ -91,10 +92,19 @@ export default function CreatePinOverlay({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
-    const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+    const { create } = usePinActions();
+    const { tags: availableTags, categories } = usePinOptions(visible);
+    const availableCategories = useMemo<CategoryItem[]>(
+        () =>
+            categories.map((name) => ({
+                name,
+                icon: CATEGORY_MAP[name]?.icon || 'pricetag-outline',
+                color: CATEGORY_MAP[name]?.color || '#8E8E93',
+            })),
+        [categories]
+    );
     const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 
-    const [availableCategories, setAvailableCategories] = useState<CategoryItem[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string>('General');
 
     const resetForm = () => {
@@ -116,31 +126,7 @@ export default function CreatePinOverlay({
     };
 
     useEffect(() => {
-        let isMounted = true;
-
-        const fetchData = async () => {
-            const [tags, categoryNames] = await Promise.all([
-                pinsApi.tags().catch(() => [] as Tag[]),
-                pinsApi.categories().catch(() => [] as string[]),
-            ]);
-            if (!isMounted) return;
-            setAvailableTags(tags);
-            setAvailableCategories(categoryNames.map((name) => ({
-                name,
-                icon: CATEGORY_MAP[name]?.icon || 'pricetag-outline',
-                color: CATEGORY_MAP[name]?.color || '#8E8E93',
-            })));
-        };
-
-        if (visible) {
-            fetchData();
-        } else {
-            resetForm();
-        }
-
-        return () => {
-            isMounted = false;
-        };
+        if (!visible) resetForm();
     }, [visible]);
 
     const toggleTag = (id: number) => {
@@ -241,7 +227,7 @@ export default function CreatePinOverlay({
         };
 
         try {
-            onPinCreated?.(await pinsApi.create(pinPayload));
+            onPinCreated?.(await create(pinPayload));
             handleClose();
         } catch (e) {
             Alert.alert('Error', (e as Error).message);

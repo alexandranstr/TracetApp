@@ -14,14 +14,18 @@ import {
     Alert
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { getAuth, signInWithCredential, GoogleAuthProvider, createUserWithEmailAndPassword } from '@react-native-firebase/auth';
-import { authApi } from '../api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { UserProfile } from '../../profile/types';
+import { useAuth } from '../useAuth';
 
 const { width, height } = Dimensions.get('window');
 
 export default function SignUpScreen({ navigation }: any) {
+    const { signUp, signInWithGoogle, finishSignIn } = useAuth();
+
+    const continueAfterSignIn = async (profile: UserProfile) => {
+        if (!(await finishSignIn(profile))) navigation.navigate('OnboardingSetup');
+    };
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
@@ -59,21 +63,9 @@ export default function SignUpScreen({ navigation }: any) {
         setIsLoading(true);
 
         try {
-            const userCredential = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
-            const dbUser = await authApi.sync();
-
-            const resolvedUserId = dbUser?.id || userCredential.user.uid;
-            await AsyncStorage.setItem('userId', resolvedUserId);
-
-            if (dbUser?.username) {
-                await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
-            }
-
+            const profile = await signUp(email, password);
             setIsLoading(false);
-
-            if (!dbUser?.username) {
-                navigation.navigate('OnboardingSetup');
-            }
+            await continueAfterSignIn(profile);
         } catch (error: any) {
             setIsLoading(false);
             if (error.code === 'auth/email-already-in-use') {
@@ -91,46 +83,9 @@ export default function SignUpScreen({ navigation }: any) {
         }
 
         try {
-            await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-            const signInResult = await GoogleSignin.signIn();
-
-            if (!signInResult || (signInResult as any).type === 'cancelled') {
-                console.log('User cancelled Google login flow');
-                return;
-            }
-
-            const idToken = signInResult.data?.idToken || (signInResult as any).idToken;
-
-            if (!idToken) {
-                console.log('No ID token received:', signInResult);
-                return;
-            }
-
-            const googleCredential = GoogleAuthProvider.credential(idToken);
-            const userCredential = await signInWithCredential(getAuth(), googleCredential);
-
-            const dbUser = await authApi.sync();
-
-            const resolvedUserId = dbUser?.id || userCredential.user.uid;
-            await AsyncStorage.setItem('userId', resolvedUserId);
-
-            if (dbUser?.username) {
-                await AsyncStorage.setItem('userProfile', JSON.stringify(dbUser));
-            }
-
-            if (!dbUser?.username) {
-                navigation.navigate('OnboardingSetup');
-            }
+            const profile = await signInWithGoogle();
+            if (profile) await continueAfterSignIn(profile);
         } catch (error: any) {
-            if (
-                error.code === statusCodes.SIGN_IN_CANCELLED ||
-                error.code === 'ASYNC_OP_IN_PROGRESS' ||
-                error.code === statusCodes.IN_PROGRESS
-            ) {
-                console.log('Google Sign-In was cancelled or in progress by user.');
-                return;
-            }
-
             Alert.alert('Error', error.message || 'Google Sign-In failed');
         }
     };

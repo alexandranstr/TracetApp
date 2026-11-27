@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, memo } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Photo from '../../../shared/components/Photo';
-import { resolvedPhotoUris } from '../../pins/api';
+import { resolvedPhotoUris } from '../../pins/photos';
 import { Pin } from '../../pins/types';
 
 const PINK_ACCENT = '#FF2D55';

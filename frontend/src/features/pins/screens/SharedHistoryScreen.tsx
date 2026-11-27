@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Photo from '../../../shared/components/Photo';
 import { resolveImageUri } from '../../../shared/imageUpload';
-import { photoUrls } from '../api';
+import { photoUrls } from '../photos';
 import { Pin } from '../types';
 import { useSharedHistory } from '../useSharedHistory';
 

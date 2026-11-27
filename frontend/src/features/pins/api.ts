@@ -1,5 +1,4 @@
 import { api, query } from '../../api/client';
-import { resolveImageUri } from '../../shared/imageUpload';
 import { CreatePinRequest, MapArea, Pin, PinsPage, PinStatistics, Tag, UpdatePinRequest } from './types';
 
 export const pinsApi = {
@@ -15,17 +14,3 @@ export const pinsApi = {
     toggleVisibility: (id: number) => api.patch<Pin>(`/api/pins/${id}/visibility`),
     remove: (id: number) => api.delete<void>(`/api/pins/${id}`),
 };
-
-export const photoUrls = (pin: Pick<Pin, 'photoUrlsJson'>): string[] => {
-    try {
-        const parsed = JSON.parse(pin.photoUrlsJson || '[]');
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-};
-
-export const resolvedPhotoUris = (pin: Pick<Pin, 'photoUrlsJson'>): string[] =>
-    photoUrls(pin)
-        .map((url) => resolveImageUri(url))
-        .filter((uri): uri is string => uri !== null);
