@@ -16,12 +16,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat, ImageResult } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getAuth } from '@react-native-firebase/auth';
 import { API_BASE_URL } from '../config';
-import { processAndUploadImage, isFirebaseUrl, resolveImageUri } from '../utils/imageUpload';
+import { imagePickerOptions, processAndUploadImage, isFirebaseUrl, resolveImageUri } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const PURPLE_ACCENT = '#AF52DE';
@@ -190,19 +189,11 @@ export default function CreatePinOverlay({
                 return;
             }
 
-            const result: ImagePicker.ImagePickerResult =
-                await ImagePicker.launchImageLibraryAsync({
-                    mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                    allowsMultipleSelection: true,
-                    selectionLimit: 10,
-                    quality: 0.8,
-                    shouldDownloadFromNetwork: true,
-                    preferredAssetRepresentationMode:
-                    ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Automatic,
-                });
+            const result = await ImagePicker.launchImageLibraryAsync(
+                imagePickerOptions({ allowsMultipleSelection: true, selectionLimit: 10 })
+            );
 
             if (!result.canceled && result.assets?.length > 0) {
-                // Check if we would exceed 10 photos
                 if (photoUrls.length + result.assets.length > 10) {
                     Alert.alert('Limit Reached', 'You can add up to 10 photos per pin.');
                     return;
@@ -215,7 +206,6 @@ export default function CreatePinOverlay({
                 for (let i = 0; i < result.assets.length; i++) {
                     const asset = result.assets[i];
                     try {
-                        // Upload to Firebase Storage (strips EXIF, validates size)
                         const downloadUrl = await processAndUploadImage(
                             asset.uri,
                             user?.uid || currentUserId,

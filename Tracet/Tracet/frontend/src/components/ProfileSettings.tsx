@@ -31,7 +31,7 @@ import * as ImagePicker from 'expo-image-picker';
 import CountryPicker, { Country, CountryCode } from 'react-native-country-picker-modal';
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../config';
-import { processAndUploadImage } from '../utils/imageUpload';
+import { imagePickerOptions, processAndUploadImage } from '../utils/imageUpload';
 
 const PINK_ACCENT = '#FF2D55';
 const DARK_BG = '#1C1C1E';
@@ -275,12 +275,9 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
             return;
         }
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.7,
-        });
+        const result = await ImagePicker.launchImageLibraryAsync(
+            imagePickerOptions({ allowsEditing: true, aspect: [1, 1] })
+        );
 
         if (!result.canceled && result.assets[0]?.uri) {
             const pickerUri = result.assets[0].uri;
@@ -288,7 +285,6 @@ export default function ProfileSettings({ currentUserId, navigation }: ProfileSe
             if (!currentUser) return;
 
             try {
-                // Upload to Firebase Storage
                 const downloadUrl = await processAndUploadImage(
                     pickerUri,
                     currentUser.uid,

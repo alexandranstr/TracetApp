@@ -22,7 +22,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../config';
-import { processAndUploadImage } from '../utils/imageUpload';
+import { imagePickerOptions, processAndUploadImage } from '../utils/imageUpload';
 
 const { width, height } = Dimensions.get('window');
 
@@ -58,12 +58,9 @@ export default function OnboardingSetupScreen({ navigation }: any) {
             return;
         }
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.7,
-        });
+        const result = await ImagePicker.launchImageLibraryAsync(
+            imagePickerOptions({ allowsEditing: true, aspect: [1, 1] })
+        );
 
         if (!result.canceled && result.assets && result.assets.length > 0) {
             setPhotoUri(result.assets[0].uri);

@@ -17,12 +17,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getAuth } from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_BASE_URL } from '../config';
-import { processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
+import { imagePickerOptions, processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
 
 const { width } = Dimensions.get('window');
 const PINK_ACCENT = '#FF2D55';
@@ -231,12 +230,9 @@ export default function JournalTab({ currentUserId, onPinUpdated }: JournalTabPr
                 return;
             }
 
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsMultipleSelection: true,
-                selectionLimit: 10,
-                quality: 0.8,
-            });
+            const result = await ImagePicker.launchImageLibraryAsync(
+                imagePickerOptions({ allowsMultipleSelection: true, selectionLimit: 10 })
+            );
 
             if (!result.canceled && result.assets?.length > 0) {
                 if (editPhotoUrls.length + result.assets.length > 10) {

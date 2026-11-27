@@ -20,12 +20,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { getAuth } from '@react-native-firebase/auth';
 import { useFocusEffect } from '@react-navigation/native';
 import { API_BASE_URL } from '../config';
-import { processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
+import { imagePickerOptions, processAndUploadImage, resolveImageUri } from '../utils/imageUpload';
 import * as signalR from '@microsoft/signalr';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -352,46 +350,10 @@ export default function ChatScreen({ navigation, route }: any) {
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permissionResult.granted) return;
 
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'] as ImagePicker.MediaType[],
-                allowsEditing: false,
-                quality: 0.8,
-                preferredAssetRepresentationMode:
-                    ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-            });
+            const result = await ImagePicker.launchImageLibraryAsync(imagePickerOptions());
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
-                const asset = result.assets[0];
-                let finalUri = asset.uri;
-
-                try {
-                    const manipResult = await ImageManipulator.manipulateAsync(
-                        asset.uri,
-                        [],
-                        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-                    );
-                    finalUri = manipResult.uri;
-                    setSelectedImage({ ...asset, uri: finalUri });
-                    return;
-                } catch (manipErr) {
-                    console.log('Image manipulation failed, trying base64 fallback:', manipErr);
-                }
-
-                try {
-                    const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-                        encoding: FileSystem.EncodingType.Base64,
-                    });
-                    const fileName = `picked_${Date.now()}.jpg`;
-                    const targetPath = `${FileSystem.documentDirectory}${fileName}`;
-                    await FileSystem.writeAsStringAsync(targetPath, base64, {
-                        encoding: FileSystem.EncodingType.Base64,
-                    });
-                    finalUri = targetPath;
-                } catch (fallbackErr) {
-                    console.log('Base64 fallback failed, using original URI:', fallbackErr);
-                }
-
-                setSelectedImage({ ...asset, uri: finalUri });
+                setSelectedImage(result.assets[0]);
             }
         } catch (err) {
             console.log('Error picking image:', err);
