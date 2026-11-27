@@ -1,4 +1,5 @@
-using FirebaseAdmin.Auth;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ using Tracet.models;
 namespace Tracet.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/[controller]")]
 [EnableRateLimiting("global")]
 public class FriendshipsController : ControllerBase
@@ -20,36 +22,13 @@ public class FriendshipsController : ControllerBase
         _context = context;
     }
 
-    private async Task<(string? Uid, IActionResult? ErrorResult)> ExtractAndVerifyTokenAsync()
-    {
-        var authHeader = Request.Headers["Authorization"].FirstOrDefault();
-        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            return (null, Unauthorized(new { message = "Missing or invalid Authorization header." }));
-        }
-
-        var idToken = authHeader.Substring("Bearer ".Length).Trim();
-
-        try
-        {
-            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken, checkRevoked: true);
-            return (decodedToken.Uid, null);
-        }
-        catch (FirebaseAuthException ex)
-        {
-            return (null, Unauthorized(new { message = "Invalid or expired token.", error = ex.Message }));
-        }
-        catch (Exception ex)
-        {
-            return (null, StatusCode(500, new { message = "Authentication error.", error = ex.Message }));
-        }
-    }
+    private string CurrentUserId => User.FindFirstValue("user_id")
+        ?? throw new InvalidOperationException("Authenticated user has no user_id claim.");
 
     [HttpGet("search")]
     public async Task<IActionResult> SearchUsers([FromQuery] string q)
     {
-        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var currentUserId = CurrentUserId;
 
         if (string.IsNullOrWhiteSpace(q) || q.Length < 1) 
             return Ok(new List<object>());
@@ -111,8 +90,7 @@ public class FriendshipsController : ControllerBase
     [HttpGet("social-overview")]
     public async Task<IActionResult> GetSocialOverview([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         page = Math.Max(1, page);
         pageSize = Math.Max(1, Math.Min(100, pageSize));
@@ -191,8 +169,7 @@ public class FriendshipsController : ControllerBase
     [HttpGet("requests")]
     public async Task<IActionResult> GetPendingRequests([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         page = Math.Max(1, page);
         pageSize = Math.Max(1, Math.Min(50, pageSize));
@@ -236,8 +213,7 @@ public class FriendshipsController : ControllerBase
     [HttpPost("request")]
     public async Task<IActionResult> SendRequest([FromBody] SendFriendRequestDto dto)
     {
-        var (senderId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var senderId = CurrentUserId;
 
         if (senderId == dto.ReceiverId)
         {
@@ -289,8 +265,7 @@ public class FriendshipsController : ControllerBase
     [HttpPost("respond")]
     public async Task<IActionResult> RespondToRequest([FromBody] RespondRequestDto dto)
     {
-        var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var currentUserId = CurrentUserId;
 
         var action = dto.Action?.Trim().ToLower();
         if (action != "accept" && action != "decline")
@@ -341,8 +316,6 @@ public class FriendshipsController : ControllerBase
     [HttpPost("sync-conversations")]
     public async Task<IActionResult> SyncConversations()
     {
-        var (_, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
 
         var acceptedFriendships = await _context.Friendships
             .Where(f => f.Status.ToLower() == "accepted")
@@ -383,8 +356,7 @@ public class FriendshipsController : ControllerBase
     [HttpPost("block")]
     public async Task<IActionResult> BlockUser([FromBody] BlockUserDto dto)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         if (userId == dto.TargetUserId)
             return BadRequest(new { message = "You cannot block yourself." });
@@ -414,8 +386,7 @@ public class FriendshipsController : ControllerBase
     [HttpPost("unblock")]
     public async Task<IActionResult> UnblockUser([FromBody] BlockUserDto dto)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         var block = await _context.BlockedUsers.FirstOrDefaultAsync(b => b.UserId == userId && b.BlockedUserId == dto.TargetUserId);
         if (block == null)
@@ -430,8 +401,7 @@ public class FriendshipsController : ControllerBase
     [HttpGet("block-status/{targetUserId}")]
     public async Task<IActionResult> GetBlockStatus(string targetUserId)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         var youBlockedThem = await _context.BlockedUsers.AnyAsync(b => b.UserId == userId && b.BlockedUserId == targetUserId);
         var theyBlockedYou = await _context.BlockedUsers.AnyAsync(b => b.BlockedUserId == userId && b.UserId == targetUserId);
@@ -446,8 +416,7 @@ public class FriendshipsController : ControllerBase
     [HttpGet("blocked")]
     public async Task<IActionResult> GetBlockedUsers([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
-        var (userId, errorResult) = await ExtractAndVerifyTokenAsync();
-        if (errorResult != null) return errorResult;
+        var userId = CurrentUserId;
 
         page = Math.Max(1, page);
         pageSize = Math.Max(1, Math.Min(50, pageSize));

@@ -1,5 +1,4 @@
-// Extends app.json with values that must not be committed.
-// Expo loads .env before evaluating this file, so secrets stay in .env (git-ignored).
+// Secrets come from .env (git-ignored), which Expo loads before this file.
 module.exports = ({ config }) => ({
   ...config,
   android: {

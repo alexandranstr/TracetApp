@@ -163,3 +163,6 @@ app.MapGet("/", () => "Tracet API is running!");
 var url = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://0.0.0.0:5001";
 Console.WriteLine($"[Tracet] Starting server on {url}");
 app.Run(url);
+
+// Used by WebApplicationFactory<Program> in Tracet.Tests.
+public partial class Program { }
