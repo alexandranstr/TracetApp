@@ -1,0 +1,20 @@
+namespace Tracet.Domain.Entities;
+
+public class User
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString(); 
+    public string Email { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string? PhotoUrl { get; set; }
+    public string? HomeCountry { get; set; }
+    public string? PhoneNumber { get; set; }
+    public bool IsTwoFactorEnabled { get; set; } = false;
+    public bool IsPhoneVerified { get; set; } = false;
+    public bool IsPrivateProfile { get; set; } = false;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public List<Pin> Pins { get; set; } = new();
+
+    public string PublicName => string.IsNullOrWhiteSpace(DisplayName) ? Username : DisplayName;
+}

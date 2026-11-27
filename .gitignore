@@ -333,3 +333,17 @@ google-services.json
 *.db
 *.db-shm
 *.db-wal
+
+# iCloud Drive conflict copies (e.g. "app 2.json")
+* [2-9].*
+* [2-9]
+
+# Rider: share only the attached frontend folder
+.idea/
+!/.idea/
+/.idea/**
+!/.idea/**/
+!/.idea/**/indexLayout.xml
+
+# Local backend data: database and Firebase key
+backend/data/

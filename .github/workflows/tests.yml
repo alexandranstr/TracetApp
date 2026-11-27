@@ -15,21 +15,21 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Run tests
-        run: dotnet test Tracet/Tracet.sln
+        run: dotnet test Tracet.slnx
 
   mobile:
     name: Mobile app (Jest)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: Tracet/Tracet/frontend
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: Tracet/Tracet/frontend/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Run tests

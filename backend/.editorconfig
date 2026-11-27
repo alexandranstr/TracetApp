@@ -1,0 +1,12 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+dotnet_diagnostic.IDE0005.severity = warning
+
+[Tracet.Tests/**.cs]
+# Rider's model sees System.Threading.Tasks.Task twice, so xUnit1028 rejects every async Task test; the build and xUnit itself accept them.
+dotnet_diagnostic.xUnit1028.severity = none

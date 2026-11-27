@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/Tracet.Domain/Tracet.Domain.csproj" />
+    <Project Path="backend/Tracet.Application/Tracet.Application.csproj" />
+    <Project Path="backend/Tracet.Infrastructure/Tracet.Infrastructure.csproj" />
+    <Project Path="backend/Tracet.Api/Tracet.Api.csproj" />
+    <Project Path="backend/Tracet.Tests/Tracet.Tests.csproj" />
+  </Folder>
+</Solution>

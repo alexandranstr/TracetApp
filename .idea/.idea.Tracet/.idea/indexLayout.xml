@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="UserContentModel">
+    <attachedFolders>
+      <Path>frontend</Path>
+    </attachedFolders>
+    <explicitIncludes />
+    <explicitExcludes>
+      <Path>frontend/node_modules</Path>
+      <Path>frontend/ios/Pods</Path>
+      <Path>frontend/ios/build</Path>
+      <Path>frontend/android/build</Path>
+      <Path>frontend/android/app/build</Path>
+      <Path>frontend/.expo</Path>
+    </explicitExcludes>
+  </component>
+</project>
