@@ -292,15 +292,21 @@ public class FriendshipsController : ControllerBase
         var (currentUserId, errorResult) = await ExtractAndVerifyTokenAsync();
         if (errorResult != null) return errorResult;
 
+        var action = dto.Action?.Trim().ToLower();
+        if (action != "accept" && action != "decline")
+            return BadRequest(new { message = "Action must be 'accept' or 'decline'." });
+
+        // Only the RECEIVER of a request may respond to it. Matching the reverse direction
+        // would let a sender accept their own outgoing request and force a friendship.
         var request = await _context.Friendships.FirstOrDefaultAsync(f =>
-            ((f.UserId == dto.SenderId && f.FriendId == currentUserId) ||
-             (f.UserId == currentUserId && f.FriendId == dto.SenderId)) && 
+            f.UserId == dto.SenderId &&
+            f.FriendId == currentUserId &&
             f.Status.ToLower() == "pending");
 
-        if (request == null) 
+        if (request == null)
             return NotFound(new { message = "Friend request not found or already processed." });
 
-        if (dto.Action.ToLower() == "accept")
+        if (action == "accept")
         {
             request.Status = "Accepted";
 
@@ -329,7 +335,7 @@ public class FriendshipsController : ControllerBase
         _context.Friendships.Update(request);
         await _context.SaveChangesAsync();
 
-        return Ok(new { success = true, message = $"Request successfully {dto.Action.ToLower()}ed." });
+        return Ok(new { success = true, message = $"Request successfully {action}ed." });
     }
 
     [HttpPost("sync-conversations")]

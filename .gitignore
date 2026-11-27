@@ -328,3 +328,8 @@ GoogleService-Info.plist
 google-services.json
 **/GoogleService-Info.plist
 **/google-services.json
+
+# SQLite databases (contain user data — never commit)
+*.db
+*.db-shm
+*.db-wal
